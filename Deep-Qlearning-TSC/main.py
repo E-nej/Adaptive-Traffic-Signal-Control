@@ -12,7 +12,7 @@ from TLAgent import TLAgent
 
 if __name__ == "__main__":
     # --- TRAINING OPTIONS ---
-    training_enabled = True
+    learn = True
     gui = False
    
     # setting the cmd mode or the visual mode
@@ -28,12 +28,11 @@ if __name__ == "__main__":
     # 0 predstavlja experiment number, 9 predstavlja epoch number (stetje je od 0)
     # ce das total_episodes na vec kot 10, potem se nadaljuje training tega modela, ce das na manj kot 10, potem se nadaljuje training naslednjega modela (npr. qmodel_1_0)
     #
-    max_steps = 1800
-    total_episodes = 80
-    num_experiments = 3
+    max_steps = 900
+    total_episodes = 30
+    num_experiments = 1
     
-    learn = training_enabled
-    traffic_gen = TrafficGenerator(max_steps)
+    traffic_gen = TrafficGenerator(max_steps, num_cars_generated=500)
     qmodel_filename, stats_filename = utils.get_file_names()
     init_experiment, init_epoch = utils.get_init_epoch( stats_filename, total_episodes)
     if not learn:

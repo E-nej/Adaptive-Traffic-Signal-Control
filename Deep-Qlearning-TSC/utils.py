@@ -30,7 +30,7 @@ def get_file_names():
 
     return qmodel_file_name, stats_file_name
 
-def get_init_epoch( filename,total_episodes ):
+def get_init_epoch(filename, total_episodes):
     if filename:
         index = filename.find('_')
         exp_start = index + 1 
