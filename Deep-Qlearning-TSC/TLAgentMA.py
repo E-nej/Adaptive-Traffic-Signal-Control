@@ -1,25 +1,12 @@
 import os
-import sys
-
-sumo_paths = [
-    '/usr/share/sumo/tools',
-    'C:\\Program Files (x86)\\Eclipse\\Sumo\\tools',
-    'C:\\Program Files\\Sumo\\tools',
-]
-s_h = os.environ.get('SUMO_HOME')
-if s_h:
-    sumo_paths.insert(0, os.path.join(s_h, 'tools'))
-for p in sumo_paths:
-    if os.path.isdir(p) and p not in sys.path:
-        sys.path.append(p)
-
-import traci  # type: ignore
 import numpy as np
 import random
 from collections import deque
 from tensorflow.keras.models import load_model  # type: ignore
 import tensorflow as tf
 
+import helpers  # sets up SUMO path and imports traci as a side effect
+import traci  # type: ignore
 from Model import Model
 
 tf.keras.utils.disable_interactive_logging()
@@ -40,29 +27,19 @@ class TLAgentMA:
                  total_episodes, qmodel_filename=None, learn=True):
         self.tl_id = tl_id
         # full state = local 88-dim + neighbour messages
-        self.num_states  = num_local_states + num_neighbours * COMM_MSG_SIZE
+        self.num_states = num_local_states + num_neighbours * COMM_MSG_SIZE
         self.num_actions = 4
         self.total_episodes = total_episodes
 
-        self.discount     = 0.95
-        self.batch_size   = 100
-        self.tau          = 20
+        self.discount = 0.95
+        self.batch_size = 100
+        self.tau = 20
         self.replay_buffer = deque(maxlen=50000)
 
-        # TL phase indices (same order as single-agent setup)
-        self.PHASE_NS_GREEN   = 0
-        self.PHASE_NS_YELLOW  = 1
-        self.PHASE_NSL_GREEN  = 2
-        self.PHASE_NSL_YELLOW = 3
-        self.PHASE_EW_GREEN   = 4
-        self.PHASE_EW_YELLOW  = 5
-        self.PHASE_EWL_GREEN  = 6
-        self.PHASE_EWL_YELLOW = 7
-
-        self.green_duration  = 10
+        self.green_duration = 10
         self.yellow_duration = 4
 
-        self.QModel       = None
+        self.QModel = None
         self.TargetQModel = None
         self._load_models(qmodel_filename, learn)
 
@@ -71,7 +48,7 @@ class TLAgentMA:
     # ------------------------------------------------------------------
 
     def _load_models(self, qmodel_filename, learn):
-        self.QModel       = Model(self.num_states, self.num_actions)
+        self.QModel = Model(self.num_states, self.num_actions)
         self.TargetQModel = Model(self.num_states, self.num_actions)
 
         if qmodel_filename and os.path.exists(qmodel_filename) and not learn:
@@ -124,16 +101,10 @@ class TLAgentMA:
     # ------------------------------------------------------------------
 
     def set_green_phase(self, action):
-        phase_map = {
-            0: self.PHASE_NS_GREEN,
-            1: self.PHASE_NSL_GREEN,
-            2: self.PHASE_EW_GREEN,
-            3: self.PHASE_EWL_GREEN,
-        }
-        traci.trafficlight.setPhase(self.tl_id, phase_map[action])
+        helpers.set_green_phase(self.tl_id, action)
 
     def set_yellow_phase(self, old_action):
-        traci.trafficlight.setPhase(self.tl_id, old_action * 2 + 1)
+        helpers.set_yellow_phase(self.tl_id, old_action)
 
     # ------------------------------------------------------------------
     # Helpers

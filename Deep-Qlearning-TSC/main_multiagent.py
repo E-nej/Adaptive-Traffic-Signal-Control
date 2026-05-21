@@ -14,16 +14,18 @@ import utils
 # Only this path needs to change when targeting a new network.
 # Everything else (sumocfg, TL programs, traffic) is auto-generated.
 # ------------------------------------------------------------------
-NET_FILE = "intersection/intersection.4L.net.xml"
+NET_FILE = "intersection/test.net.xml"
 
 if __name__ == "__main__":
     # --- SETTINGS ---
     mode             = "train"   # "train" | "evaluate" | "classical"
     gui              = False
     max_steps        = 900
-    total_episodes   = 20
+    total_episodes   = 10
     num_experiments  = 1
-    num_vehicles     = 700
+    num_vehicles     = 20
+    show_plots       = True
+    save_plots       = True
 
     sumoBinary = 'sumo-gui' if gui else 'sumo'
 
@@ -238,8 +240,8 @@ if __name__ == "__main__":
         del agents
 
         print(f'Experiment {experiment} [{mode}] complete')
-        utils.plot_rewards(stats['rewards'][:experiment + 1])
-        utils.plot_intersection_queue_size(stats['intersection_queue'][:experiment + 1])
-        utils.plot_delay(stats['delay'][:experiment + 1])
-        utils.plot_stops(stats['stops'][:experiment + 1])
-        utils.plot_co2(stats['co2'][:experiment + 1])
+        utils.plot_rewards(stats['rewards'][:experiment + 1], show=show_plots, save=save_plots)
+        utils.plot_intersection_queue_size(stats['intersection_queue'][:experiment + 1], show=show_plots, save=save_plots)
+        utils.plot_delay(stats['delay'][:experiment + 1], show=show_plots, save=save_plots)
+        utils.plot_stops(stats['stops'][:experiment + 1], show=show_plots, save=save_plots)
+        utils.plot_co2(stats['co2'][:experiment + 1], show=show_plots, save=save_plots)

@@ -1,6 +1,7 @@
 import os
-import traci
 import numpy as np
+from helpers import get_lane_cell, get_edge_waiting_time  # also runs SUMO path setup
+import traci  # type: ignore
 
 
 class MultiSumoEnv:
@@ -158,17 +159,9 @@ class MultiSumoEnv:
 
             lane_pos = self.SUMO_INT_LANE_LENGTH - traci.vehicle.getLanePosition(veh_id)
 
-            if   lane_pos < 7:   lane_cell = 0
-            elif lane_pos < 14:  lane_cell = 1
-            elif lane_pos < 21:  lane_cell = 2
-            elif lane_pos < 28:  lane_cell = 3
-            elif lane_pos < 40:  lane_cell = 4
-            elif lane_pos < 60:  lane_cell = 5
-            elif lane_pos < 100: lane_cell = 6
-            elif lane_pos < 200: lane_cell = 7
-            elif lane_pos < 350: lane_cell = 8
-            elif lane_pos <= 500: lane_cell = 9
-            else: continue
+            if lane_pos > 500:
+                continue
+            lane_cell = get_lane_cell(lane_pos)
 
             base_group = lane_groups[edge_id]
             lane_group = base_group if int(lane_str) <= 2 else base_group + 1
@@ -191,12 +184,7 @@ class MultiSumoEnv:
     # ------------------------------------------------------------------
 
     def _get_waiting_time(self, roads):
-        total = 0.0
-        road_set = set(roads)
-        for veh_id in traci.vehicle.getIDList():
-            if traci.vehicle.getRoadID(veh_id) in road_set:
-                total += traci.vehicle.getAccumulatedWaitingTime(veh_id)
-        return total
+        return get_edge_waiting_time(roads)
 
     def _get_queue(self, roads):
         return sum(traci.edge.getLastStepHaltingNumber(r) for r in roads)
