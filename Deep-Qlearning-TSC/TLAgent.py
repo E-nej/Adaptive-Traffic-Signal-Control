@@ -161,6 +161,9 @@ class TLAgent:
             self.env.reset()
 
     def train(self, experiment):
+        best_reward = -np.inf
+        best_epoch = None
+
         self.traffic_gen.generate_routefile(experiment * self.total_episodes + self.init_epoch)
         curr_state = self.env.start()
 
@@ -228,9 +231,13 @@ class TLAgent:
             self._save_stats(experiment, e, avg_intersection_queue, avg_neg_rewards,
                              avg_delay, avg_stops, avg_co2)
 
-            utils.save_qmodel(self.QModel, experiment, e)
+            if avg_neg_rewards > best_reward:
+                best_reward = avg_neg_rewards
+                utils.save_qmodel(self.QModel, experiment, e)
+                if best_epoch is not None:
+                    utils.remove_qmodel(experiment, best_epoch)
+                best_epoch = e
             if e != 0:
-                utils.remove_qmodel(experiment, e - 1)
                 utils.remove_stats(experiment, e - 1)
             if e + 1 < self.total_episodes:
                 self.traffic_gen.generate_routefile(experiment * self.total_episodes + e + 1)
