@@ -89,7 +89,11 @@ def plot_sample(sample, title, xlabel, legend_label, show=True):
     if show:
         plt.show()
     
-def plot_rewards(reward_store, save=True, show=False):
+def _plot_path(name, run_tag):
+    suffix = f'_{run_tag}' if run_tag else ''
+    return f'{FOLDER}plot_{name}{suffix}.png'
+
+def plot_rewards(reward_store, save=True, show=False, run_tag=''):
     x = np.mean(reward_store, axis=0)
     plt.figure()
     plt.plot(x, label="Average reward per step")
@@ -98,12 +102,12 @@ def plot_rewards(reward_store, save=True, show=False):
     plt.title('Average reward across episodes')
     plt.legend()
     if save:
-        plt.savefig(f'{FOLDER}plot_rewards.png', bbox_inches='tight')
+        plt.savefig(_plot_path('rewards', run_tag), bbox_inches='tight')
     if show:
         plt.show()
     plt.close()
 
-def plot_intersection_queue_size(intersection_queue_store, save=True, show=False):
+def plot_intersection_queue_size(intersection_queue_store, save=True, show=False, run_tag=''):
     x = np.mean(intersection_queue_store, axis=0)
     plt.figure()
     plt.plot(x, label="Average intersection queue size per step", color='m')
@@ -112,12 +116,12 @@ def plot_intersection_queue_size(intersection_queue_store, save=True, show=False
     plt.title('Average intersection queue size across episodes')
     plt.legend()
     if save:
-        plt.savefig(f'{FOLDER}plot_queue.png', bbox_inches='tight')
+        plt.savefig(_plot_path('queue', run_tag), bbox_inches='tight')
     if show:
         plt.show()
     plt.close()
 
-def plot_delay(delay_store, save=True, show=False):
+def plot_delay(delay_store, save=True, show=False, run_tag=''):
     x = np.mean(delay_store, axis=0)
     plt.figure()
     plt.plot(x, label="Average delay per step", color='steelblue')
@@ -126,12 +130,12 @@ def plot_delay(delay_store, save=True, show=False):
     plt.title('Average vehicle delay across episodes')
     plt.legend()
     if save:
-        plt.savefig(f'{FOLDER}plot_delay.png', bbox_inches='tight')
+        plt.savefig(_plot_path('delay', run_tag), bbox_inches='tight')
     if show:
         plt.show()
     plt.close()
 
-def plot_stops(stops_store, save=True, show=False):
+def plot_stops(stops_store, save=True, show=False, run_tag=''):
     x = np.mean(stops_store, axis=0)
     plt.figure()
     plt.plot(x, label="Average stops per step", color='darkorange')
@@ -140,12 +144,12 @@ def plot_stops(stops_store, save=True, show=False):
     plt.title('Average vehicle stops across episodes')
     plt.legend()
     if save:
-        plt.savefig(f'{FOLDER}plot_stops.png', bbox_inches='tight')
+        plt.savefig(_plot_path('stops', run_tag), bbox_inches='tight')
     if show:
         plt.show()
     plt.close()
 
-def plot_co2(co2_store, save=True, show=False):
+def plot_co2(co2_store, save=True, show=False, run_tag=''):
     x = np.mean(co2_store, axis=0)
     plt.figure()
     plt.plot(x, label="Average CO2 per step", color='green')
@@ -154,7 +158,43 @@ def plot_co2(co2_store, save=True, show=False):
     plt.title('Average CO2 emissions across episodes')
     plt.legend()
     if save:
-        plt.savefig(f'{FOLDER}plot_co2.png', bbox_inches='tight')
+        plt.savefig(_plot_path('co2', run_tag), bbox_inches='tight')
+    if show:
+        plt.show()
+    plt.close()
+
+def plot_throughput(spawned_store, arrived_store, save=True, show=False, run_tag=''):
+    plt.figure()
+    plt.plot(np.mean(spawned_store, axis=0), label="Spawned", color='steelblue')
+    plt.plot(np.mean(arrived_store, axis=0), label="Arrived", color='green')
+    plt.xlabel('Episodes')
+    plt.ylabel('Vehicles per episode')
+    plt.title('Vehicle throughput across episodes')
+    plt.legend()
+    if save:
+        plt.savefig(_plot_path('throughput', run_tag), bbox_inches='tight')
+    if show:
+        plt.show()
+    plt.close()
+
+def plot_safety(emergency_store, collision_store, save=True, show=False, run_tag=''):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+
+    ax1.plot(np.mean(emergency_store, axis=0), color='red', label="Emergency stops per step")
+    ax1.set_xlabel('Episodes')
+    ax1.set_ylabel('Emergency stops per step')
+    ax1.set_title('Emergency braking events')
+    ax1.legend()
+
+    ax2.plot(np.mean(collision_store, axis=0), color='darkred', label="Collisions per episode")
+    ax2.set_xlabel('Episodes')
+    ax2.set_ylabel('Collisions per episode')
+    ax2.set_title('Collisions across episodes')
+    ax2.legend()
+
+    plt.tight_layout()
+    if save:
+        plt.savefig(_plot_path('safety', run_tag), bbox_inches='tight')
     if show:
         plt.show()
     plt.close()

@@ -25,7 +25,7 @@ class MultiSumoEnv:
     """
 
     def __init__(self, sumoBinary, max_steps, sumocfg,
-                 tl_config=None, net_file=None):
+                 tl_config=None, net_file=None, num_vehicles=500):
         if tl_config is None:
             if net_file is None:
                 raise ValueError("Provide either tl_config or net_file")
@@ -42,6 +42,7 @@ class MultiSumoEnv:
         self.SUMO_INT_LANE_LENGTH = 500
         self.num_states = 88  # 80 binary + 8 normalised scalar features
         self.max_steps = max_steps
+        self.num_vehicles = max(1, num_vehicles)
         self.tl_ids = list(tl_config.keys())
         self.tl_config = tl_config
 
@@ -61,6 +62,11 @@ class MultiSumoEnv:
             tl_id: {"queue": 0, "delay": 0, "stops": 0, "co2": 0,
                     "speed": 0, "vehicle_count": 0}
             for tl_id in self.tl_ids
+        }
+        # simulation-wide metrics (not per-TL)
+        self.last_sim_metrics = {
+            "spawned": 0, "arrived": 0,
+            "emergency_stops": 0, "collisions": 0,
         }
 
     # ------------------------------------------------------------------
@@ -99,9 +105,19 @@ class MultiSumoEnv:
                     "co2": 0, "speed": 0, "count": 0}
             for tl_id in self.tl_ids
         }
+        sim_acc = {"spawned": 0, "arrived": 0, "emergency_stops": 0, "collisions": 0}
 
         for _ in range(num_steps):
             traci.simulationStep()
+
+            sim_acc["spawned"]  += traci.simulation.getDepartedNumber()
+            sim_acc["arrived"]  += traci.simulation.getArrivedNumber()
+            sim_acc["collisions"] += traci.simulation.getCollidingVehiclesNumber()
+            try:
+                sim_acc["emergency_stops"] += traci.simulation.getEmergencyStoppingVehiclesNumber()
+            except AttributeError:
+                pass  # older SUMO versions may not have this call
+
             for tl_id in self.tl_ids:
                 roads = self.tl_config[tl_id]["incoming_roads"]
                 acc[tl_id]["queue"] += self._get_queue(roads)
@@ -116,6 +132,7 @@ class MultiSumoEnv:
                 acc[tl_id]["count"] += self._get_vehicle_count(roads)
 
         self.steps += num_steps
+        self.last_sim_metrics = sim_acc
 
         is_terminal = (
             self.steps >= self.max_steps
@@ -167,15 +184,17 @@ class MultiSumoEnv:
             lane_group = base_group if int(lane_str) <= 2 else base_group + 1
             state[lane_group * 10 + lane_cell] = 1
 
+        queue = self._get_queue(incoming)
+        nv = self.num_vehicles
         extra = np.array([
-            self._get_queue(incoming)         / 500,
-            self._get_vehicle_count(incoming) / 500,
+            queue                             / nv,
+            self._get_vehicle_count(incoming) / nv,
             self._get_avg_speed(incoming)     / 25,
             traci.trafficlight.getPhase(tl_id) / 7,
-            self._get_queue(incoming)         / 500,   # stops ≡ queue (halting)
+            self._get_waiting_time(incoming)  / (nv * 100),
             self._get_co2(incoming)           / 100000,
             self.steps / self.max_steps,
-            traci.simulation.getMinExpectedNumber() / 500,
+            traci.simulation.getMinExpectedNumber() / nv,
         ])
         return np.concatenate([state, extra])
 

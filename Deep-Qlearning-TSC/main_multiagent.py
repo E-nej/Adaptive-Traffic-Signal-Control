@@ -2,6 +2,7 @@ import glob
 import os
 import numpy as np
 from tqdm import tqdm
+from datetime import datetime
 
 from NetworkParser import NetworkParser
 from MultiSumoEnv import MultiSumoEnv
@@ -28,6 +29,7 @@ if __name__ == "__main__":
     save_plots       = True
 
     sumoBinary = 'sumo-gui' if gui else 'sumo'
+    run_tag    = f"{mode}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     # --- derive all paths from NET_FILE ---
     net_dir  = os.path.dirname(NET_FILE)
@@ -59,6 +61,10 @@ if __name__ == "__main__":
         'delay':              np.zeros((num_experiments, total_episodes)),
         'stops':              np.zeros((num_experiments, total_episodes)),
         'co2':                np.zeros((num_experiments, total_episodes)),
+        'spawned':            np.zeros((num_experiments, total_episodes)),
+        'arrived':            np.zeros((num_experiments, total_episodes)),
+        'emergency_stops':    np.zeros((num_experiments, total_episodes)),
+        'collisions':         np.zeros((num_experiments, total_episodes)),
     }
 
     for experiment in range(num_experiments):
@@ -79,16 +85,18 @@ if __name__ == "__main__":
                 )
                 print(f"{tl_id}: loading {model_files[tl_id]}")
 
-        env = MultiSumoEnv(sumoBinary, max_steps, SUMOCFG, tl_config=tl_config)
+        env = MultiSumoEnv(sumoBinary, max_steps, SUMOCFG,
+                           tl_config=tl_config, num_vehicles=num_vehicles)
 
         agents = {
             tl_id: TLAgentMA(
                 tl_id=tl_id,
-                num_local_states=88,
+                num_local_states=env.num_states,
                 num_neighbours=max_neighbours,
                 total_episodes=total_episodes,
                 qmodel_filename=model_files.get(tl_id),
                 learn=(mode == "train"),
+                num_vehicles=num_vehicles,
             )
             for tl_id in tl_ids
         }
@@ -101,6 +109,9 @@ if __name__ == "__main__":
         ep_bar = tqdm(range(total_episodes), desc=f"Exp {experiment} [{mode}]",
                       unit="ep", position=0, leave=True)
 
+        best_avg_reward = -np.inf
+        best_epoch      = None
+
         for e in ep_bar:
             # Build initial states (not needed for classical)
             curr_states = {}
@@ -111,7 +122,7 @@ if __name__ == "__main__":
                         np.concatenate([raw_states[tl_id], msgs])
                     )
 
-            if mode == "train" and e > 0 and e % agents[tl_ids[0]].tau == 0:
+            if mode == "train" and e > 0:
                 for agent in agents.values():
                     agent.sync_target()
 
@@ -124,6 +135,11 @@ if __name__ == "__main__":
             sum_delay  = {tl_id: 0.0 for tl_id in tl_ids}
             sum_stops  = {tl_id: 0.0 for tl_id in tl_ids}
             sum_co2    = {tl_id: 0.0 for tl_id in tl_ids}
+
+            sum_spawned   = 0
+            sum_arrived   = 0
+            sum_emergency = 0
+            sum_collisions = 0
 
             step_bar = tqdm(total=max_steps, desc=f"  Ep {e:3d} steps",
                             unit="step", position=1, leave=False)
@@ -158,12 +174,22 @@ if __name__ == "__main__":
                     step_bar.update(agents[tl_ids[0]].yellow_duration)
                     for tl_id in tl_ids:
                         yellow_rewards[tl_id] = yellow_results[tl_id][0]
+                    sm = env.last_sim_metrics
+                    sum_spawned    += sm['spawned']
+                    sum_arrived    += sm['arrived']
+                    sum_emergency  += sm['emergency_stops']
+                    sum_collisions += sm['collisions']
 
                 # --- green phase ---
                 for tl_id, agent in agents.items():
                     agent.set_green_phase(actions[tl_id])
                 green_results, done = env.step(agents[tl_ids[0]].green_duration)
                 step_bar.update(agents[tl_ids[0]].green_duration)
+                sm = env.last_sim_metrics
+                sum_spawned    += sm['spawned']
+                sum_arrived    += sm['arrived']
+                sum_emergency  += sm['emergency_stops']
+                sum_collisions += sm['collisions']
 
                 # --- update comm after step ---
                 if mode != "classical":
@@ -197,31 +223,39 @@ if __name__ == "__main__":
             step_bar.close()
             steps_used = max(1, env.steps)
 
-            avg_reward = float(np.mean([sum_reward[t] / steps_used for t in tl_ids]))
-            avg_queue  = float(np.mean([sum_queue[t]  / steps_used for t in tl_ids]))
-            avg_delay  = float(np.mean([sum_delay[t]  / steps_used for t in tl_ids]))
-            avg_stops  = float(np.mean([sum_stops[t]  / steps_used for t in tl_ids]))
-            avg_co2    = float(np.mean([sum_co2[t]    / steps_used for t in tl_ids]))
+            avg_reward    = float(np.mean([sum_reward[t] / steps_used for t in tl_ids]))
+            avg_queue     = float(np.mean([sum_queue[t]  / steps_used for t in tl_ids]))
+            avg_delay     = float(np.mean([sum_delay[t]  / steps_used for t in tl_ids]))
+            avg_stops     = float(np.mean([sum_stops[t]  / steps_used for t in tl_ids]))
+            avg_co2       = float(np.mean([sum_co2[t]    / steps_used for t in tl_ids]))
+            avg_emergency = sum_emergency / steps_used
 
             stats['rewards'][experiment, e]            = avg_reward
             stats['intersection_queue'][experiment, e] = avg_queue
             stats['delay'][experiment, e]              = avg_delay
             stats['stops'][experiment, e]              = avg_stops
             stats['co2'][experiment, e]                = avg_co2
+            stats['spawned'][experiment, e]            = sum_spawned
+            stats['arrived'][experiment, e]            = sum_arrived
+            stats['emergency_stops'][experiment, e]    = avg_emergency
+            stats['collisions'][experiment, e]         = sum_collisions
 
             ep_bar.set_postfix({
-                'reward': f'{avg_reward:.4f}',
-                'queue':  f'{avg_queue:.2f}',
-                'delay':  f'{avg_delay:.2f}',
+                'reward':   f'{avg_reward:.4f}',
+                'queue':    f'{avg_queue:.2f}',
+                'arrived':  f'{sum_arrived}/{sum_spawned}',
             })
 
             # --- checkpointing (train only) ---
             if mode == "train":
-                for tl_id, agent in agents.items():
-                    agent_key = f'{tl_id}_{experiment}'
-                    utils.save_qmodel(agent.QModel, agent_key, e)
-                    if e > 0:
-                        utils.remove_qmodel(agent_key, e - 1)
+                if avg_reward > best_avg_reward:
+                    best_avg_reward = avg_reward
+                    for tl_id, agent in agents.items():
+                        agent_key = f'{tl_id}_{experiment}'
+                        utils.save_qmodel(agent.QModel, agent_key, e)
+                        if best_epoch is not None:
+                            utils.remove_qmodel(agent_key, best_epoch)
+                    best_epoch = e
 
                 np.save(f'results/stats_2TL_{experiment}_{e}.npy', stats)
                 if e > 0:
@@ -234,14 +268,20 @@ if __name__ == "__main__":
                 traffic_gen.generate_routefile(
                     seed=experiment * total_episodes + e + 1
                 )
-            raw_states = env.reset()
+                raw_states = env.reset()
 
         del env
         del agents
 
         print(f'Experiment {experiment} [{mode}] complete')
-        utils.plot_rewards(stats['rewards'][:experiment + 1], show=show_plots, save=save_plots)
-        utils.plot_intersection_queue_size(stats['intersection_queue'][:experiment + 1], show=show_plots, save=save_plots)
-        utils.plot_delay(stats['delay'][:experiment + 1], show=show_plots, save=save_plots)
-        utils.plot_stops(stats['stops'][:experiment + 1], show=show_plots, save=save_plots)
-        utils.plot_co2(stats['co2'][:experiment + 1], show=show_plots, save=save_plots)
+        utils.plot_rewards(stats['rewards'][:experiment + 1], show=show_plots, save=save_plots, run_tag=run_tag)
+        utils.plot_intersection_queue_size(stats['intersection_queue'][:experiment + 1], show=show_plots, save=save_plots, run_tag=run_tag)
+        utils.plot_delay(stats['delay'][:experiment + 1], show=show_plots, save=save_plots, run_tag=run_tag)
+        utils.plot_stops(stats['stops'][:experiment + 1], show=show_plots, save=save_plots, run_tag=run_tag)
+        utils.plot_co2(stats['co2'][:experiment + 1], show=show_plots, save=save_plots, run_tag=run_tag)
+        utils.plot_throughput(stats['spawned'][:experiment + 1],
+                              stats['arrived'][:experiment + 1],
+                              show=show_plots, save=save_plots, run_tag=run_tag)
+        utils.plot_safety(stats['emergency_stops'][:experiment + 1],
+                          stats['collisions'][:experiment + 1],
+                          show=show_plots, save=save_plots, run_tag=run_tag)

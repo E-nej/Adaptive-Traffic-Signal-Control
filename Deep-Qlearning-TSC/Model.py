@@ -17,7 +17,7 @@ class Model:
             Dense(400, activation='relu'),
             Dense(num_actions, activation='linear'),
         ])
-        model.compile(loss='mse', optimizer=Adam())
+        model.compile(loss='huber', optimizer=Adam(learning_rate=2.5e-4, clipnorm=1.0))
         self.model = model
 
     def get_weights(self):

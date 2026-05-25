@@ -24,17 +24,22 @@ class TLAgentMA:
     """
 
     def __init__(self, tl_id, num_local_states, num_neighbours,
-                 total_episodes, qmodel_filename=None, learn=True):
+                 total_episodes, qmodel_filename=None, learn=True, num_vehicles=500):
         self.tl_id = tl_id
         # full state = local 88-dim + neighbour messages
         self.num_states = num_local_states + num_neighbours * COMM_MSG_SIZE
         self.num_actions = 4
         self.total_episodes = total_episodes
+        self.num_vehicles = num_vehicles
 
         self.discount = 0.95
         self.batch_size = 100
-        self.tau = 20
+        self.polyak = 0.005   # soft target update coefficient
         self.replay_buffer = deque(maxlen=50000)
+
+        self.epsilon_start = 1.0
+        self.epsilon_min   = 0.05
+        self.epsilon_decay = 0.995  # hits floor (~0.05) around episode 600
 
         self.green_duration = 10
         self.yellow_duration = 4
@@ -50,6 +55,7 @@ class TLAgentMA:
     def _load_models(self, qmodel_filename, learn):
         self.QModel = Model(self.num_states, self.num_actions)
         self.TargetQModel = Model(self.num_states, self.num_actions)
+        self.TargetQModel.set_weights(self.QModel.get_weights())  # start in sync
 
         if qmodel_filename and os.path.exists(qmodel_filename) and not learn:
             loaded = load_model(qmodel_filename)
@@ -64,7 +70,8 @@ class TLAgentMA:
     def select_action(self, episode, state, learn=True):
         """state: np.array shape (1, num_states) — already preprocessed."""
         if learn:
-            epsilon = max(0.05, 1 - episode / self.total_episodes)
+            epsilon = max(self.epsilon_min,
+                          self.epsilon_start * (self.epsilon_decay ** episode))
             if np.random.random() <= epsilon:
                 return np.random.randint(self.num_actions)
         return int(np.argmax(self.QModel.predict(state)))
@@ -85,16 +92,27 @@ class TLAgentMA:
         curr_states = np.array([m[0][0] for m in mini_batch])
         next_states = np.array([m[3][0] for m in mini_batch])
 
-        q_curr = self.QModel.predict(curr_states)
-        q_next = self.TargetQModel.predict(next_states)
+        q_curr        = self.QModel.predict(curr_states)
+        q_next_online = self.QModel.predict(next_states)        # action selection
+        q_next_target = self.TargetQModel.predict(next_states)  # action evaluation (Double DQN)
 
         for i, (_, action, reward, _, done) in enumerate(mini_batch):
-            q_curr[i][action] = reward if done else reward + self.discount * np.max(q_next[i])
+            if done:
+                q_curr[i][action] = reward
+            else:
+                best_next = np.argmax(q_next_online[i])
+                q_curr[i][action] = reward + self.discount * q_next_target[i][best_next]
 
         self.QModel.model.train_on_batch(curr_states, q_curr)
 
     def sync_target(self):
-        self.TargetQModel.set_weights(self.QModel.get_weights())
+        """Polyak (soft) update: θ_target ← τ·θ_online + (1−τ)·θ_target."""
+        q_w = self.QModel.get_weights()
+        t_w = self.TargetQModel.get_weights()
+        self.TargetQModel.set_weights([
+            self.polyak * qw + (1 - self.polyak) * tw
+            for qw, tw in zip(q_w, t_w)
+        ])
 
     # ------------------------------------------------------------------
     # Phase control  (called by the shared training loop)
@@ -116,9 +134,10 @@ class TLAgentMA:
     def build_comm_message(self, env):
         """4-value message broadcast to neighbours: [queue, count, speed, phase]."""
         roads = env.tl_config[self.tl_id]["incoming_roads"]
+        nv = max(1, self.num_vehicles)
         return [
-            env._get_queue(roads)         / 500,
-            env._get_vehicle_count(roads) / 500,
+            env._get_queue(roads)         / nv,
+            env._get_vehicle_count(roads) / nv,
             env._get_avg_speed(roads)     / 25,
             traci.trafficlight.getPhase(self.tl_id) / 7,
         ]
