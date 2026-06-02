@@ -33,11 +33,6 @@ class SumoEnv:
         self.SUMO_INT_LANE_LENGTH = 500
         self.num_states = 88  # 80 binary position cells + 8 normalised scalar features
         self.max_steps = max_steps
-        # reward weights: delay, stops/queue, CO2
-        self.w1 = 0.4
-        self.w2 = 0.2
-        self.w3 = 0.2
-        self.w4 = 0.0001  # CO2 is in mg/s so needs a much smaller weight
         self._init()
 
     def _init(self):
@@ -84,8 +79,9 @@ class SumoEnv:
         if self.steps + num_steps > self.max_steps:
             num_steps = self.max_steps - self.steps
 
+        old_wait_time = self.curr_wait_time  # saved before loop for reward calc
+
         queue_sum = 0
-        delay_sum = 0
         co2_sum = 0
         speed_sum = 0
         vehicle_count_sum = 0
@@ -95,10 +91,6 @@ class SumoEnv:
 
             halting = self._get_halting_count()
             queue_sum += halting
-
-            new_wait = self._get_waiting_time()
-            delay_sum += new_wait - self.curr_wait_time
-            self.curr_wait_time = new_wait
 
             co2 = self._get_co2()
             co2_sum += co2
@@ -113,22 +105,21 @@ class SumoEnv:
             self._step_speed = speed
             self._step_count = count
 
+        new_wait_time = self._get_waiting_time()
+
         self.last_queue_sum = queue_sum
-        self.last_delay_sum = delay_sum
-        self.last_stops_sum = queue_sum  # stops and queue measure the same metric
+        self.last_delay_sum = new_wait_time - old_wait_time
+        self.last_stops_sum = queue_sum
         self.last_co2_sum = co2_sum
         self.last_speed_sum = speed_sum
         self.last_vehicle_count_sum = vehicle_count_sum
 
         self.steps += num_steps
         self.current_state = self._encode_env_state()
+        self.curr_wait_time = new_wait_time
 
-        reward = -(
-            self.w1 * delay_sum +
-            self.w2 * queue_sum +  # w2 + w3 effectively sum since stops == queue
-            self.w3 * queue_sum +
-            self.w4 * co2_sum
-        ) / max(1, num_steps)
+        # Original reward: reduction in cumulative waiting time across incoming lanes
+        reward = 0.9 * old_wait_time - new_wait_time
 
         is_terminal = (
             self.steps >= self.max_steps

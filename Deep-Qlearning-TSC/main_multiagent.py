@@ -21,10 +21,10 @@ if __name__ == "__main__":
     # --- SETTINGS ---
     mode             = "train"   # "train" | "evaluate" | "classical"
     gui              = False
-    max_steps        = 900
+    max_steps        = 100
     total_episodes   = 10
     num_experiments  = 1
-    num_vehicles     = 20
+    num_vehicles     = 10
     show_plots       = True
     save_plots       = True
 
@@ -285,3 +285,9 @@ if __name__ == "__main__":
         utils.plot_safety(stats['emergency_stops'][:experiment + 1],
                           stats['collisions'][:experiment + 1],
                           show=show_plots, save=save_plots, run_tag=run_tag)
+
+        # Overlay comparison if single-agent results exist
+        sa_stats = utils.load_latest_stats('results/stats_sa_*.npy')
+        if sa_stats:
+            utils.plot_comparison(sa_stats, stats,
+                                  show=show_plots, save=save_plots, run_tag=run_tag + '_sa_vs_ma')

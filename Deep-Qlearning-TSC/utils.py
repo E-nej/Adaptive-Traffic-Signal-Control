@@ -6,9 +6,10 @@ Created on Sun Mar 22 21:55:20 2020
 """
 
 import os
+import re
 
 import matplotlib.pyplot as plt # type: ignore
-import numpy as np 
+import numpy as np
 import glob
 import seaborn as sns # type: ignore
 
@@ -198,6 +199,65 @@ def plot_safety(emergency_store, collision_store, save=True, show=False, run_tag
     if show:
         plt.show()
     plt.close()
+
+def load_latest_stats(pattern):
+    """Return the most recent .npy stats file matching a glob pattern, or None."""
+    files = glob.glob(pattern)
+    if not files:
+        return None
+    return np.load(max(files), allow_pickle=True)[()]
+
+def plot_comparison(sa_stats, ma_stats, show=False, save=True, run_tag=''):
+    """Overlay single-agent and multi-agent results on the same figures."""
+    metrics = [
+        ('rewards',            'Average reward per step',     'Reward'),
+        ('intersection_queue', 'Average queue size per step', 'Queue size'),
+        ('delay',              'Average delay per step (s)',  'Delay'),
+        ('stops',              'Average stops per step',      'Stops'),
+        ('co2',                'Average CO2 per step (mg)',   'CO2'),
+    ]
+    for key, ylabel, title in metrics:
+        plt.figure()
+        if sa_stats is not None and key in sa_stats:
+            plt.plot(np.mean(sa_stats[key], axis=0),
+                     label='Single Agent (no comms)', color='steelblue')
+        if ma_stats is not None and key in ma_stats:
+            plt.plot(np.mean(ma_stats[key], axis=0),
+                     label='Multi-Agent (with comms)', color='darkorange')
+        plt.xlabel('Episodes')
+        plt.ylabel(ylabel)
+        plt.title(f'{title}: Single Agent vs Multi-Agent')
+        plt.legend()
+        if save:
+            plt.savefig(_plot_path(f'comparison_{key}', run_tag), bbox_inches='tight')
+        if show:
+            plt.show()
+        plt.close()
+
+    # Throughput comparison when both have it
+    has_sa_tp = sa_stats is not None and 'spawned' in sa_stats and 'arrived' in sa_stats
+    has_ma_tp = ma_stats is not None and 'spawned' in ma_stats and 'arrived' in ma_stats
+    if has_sa_tp or has_ma_tp:
+        plt.figure()
+        if has_sa_tp:
+            plt.plot(np.mean(sa_stats['arrived'], axis=0),
+                     label='SA arrived', color='steelblue', linestyle='-')
+            plt.plot(np.mean(sa_stats['spawned'], axis=0),
+                     label='SA spawned', color='steelblue', linestyle='--')
+        if has_ma_tp:
+            plt.plot(np.mean(ma_stats['arrived'], axis=0),
+                     label='MA arrived', color='darkorange', linestyle='-')
+            plt.plot(np.mean(ma_stats['spawned'], axis=0),
+                     label='MA spawned', color='darkorange', linestyle='--')
+        plt.xlabel('Episodes')
+        plt.ylabel('Vehicles per episode')
+        plt.title('Throughput: Single Agent vs Multi-Agent')
+        plt.legend()
+        if save:
+            plt.savefig(_plot_path('comparison_throughput', run_tag), bbox_inches='tight')
+        if show:
+            plt.show()
+        plt.close()
 
 def remove_qmodel(experiment, e):
     os.remove('{}qmodel_{}_{}.keras'.format(FOLDER, experiment, e))

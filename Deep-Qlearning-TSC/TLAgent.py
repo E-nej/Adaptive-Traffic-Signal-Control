@@ -15,7 +15,8 @@ tf.keras.utils.disable_interactive_logging()
 
 class TLAgent:
     def __init__(self, env, traffic_gen, max_steps, num_experients, total_episodes,
-                 qmodel_filename, stats_filename, stats, init_epoch, learn=True):
+                 qmodel_filename, stats_filename, stats, init_epoch, learn=True,
+                 tl_id="TL"):
         self.env = env
         self.traffic_gen = traffic_gen
         self.total_episodes = total_episodes
@@ -24,6 +25,7 @@ class TLAgent:
         self.batch_size = 100
         self.num_states = 88
         self.num_actions = 4
+        self.tl_id = tl_id
         self.num_experiments = num_experients
         self.green_duration = 10
         self.yellow_duration = 4
@@ -81,10 +83,10 @@ class TLAgent:
         return int(np.argmax(self.QModel.predict(state)))
 
     def _set_yellow_phase(self, old_action):
-        helpers.set_yellow_phase("TL", old_action)
+        helpers.set_yellow_phase(self.tl_id, old_action)
 
     def _set_green_phase(self, action):
-        helpers.set_green_phase("TL", action)
+        helpers.set_green_phase(self.tl_id, action)
 
     def evaluate_model(self, experiment, seeds):
         self.traffic_gen.generate_routefile(seeds[self.init_epoch])
