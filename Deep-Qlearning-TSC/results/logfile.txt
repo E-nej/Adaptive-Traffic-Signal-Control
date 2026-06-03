@@ -1,0 +1,20 @@
+***Starting server on port 46881 ***
+Loading net-file from 'intersection/test.net.xml' ... done (1ms).
+Loading additional-files from 'intersection/tl_programs.add.xml' ... done (0ms).
+Warning: Unsafe green phase 4 in tlLogic 'J1', program 'dqn'. Lane '-E6_0' is targeted by 2 'G'-links. (use 'g' instead)
+Warning: Unsafe green phase 4 in tlLogic 'J3', program 'dqn'. Lane 'E9_0' is targeted by 2 'G'-links. (use 'g' instead)
+Warning: Unsafe green phase 6 in tlLogic 'J4', program 'dqn'. Lane 'E4_0' is targeted by 2 'G'-links. (use 'g' instead)
+Loading route-files incrementally from 'intersection/trips.xml'
+Loading done.
+Simulation version 1.27.0 started with time: 0.00.
+Simulation ended at time: 6000.00.
+Reason: TraCI requested termination.
+Performance:
+ Duration: 28.42s
+ TraCI-Duration: 28.34s
+ Real time factor: 211.089
+ UPS: 387.383901
+Vehicles:
+ Inserted: 200
+ Running: 1
+ Waiting: 0
