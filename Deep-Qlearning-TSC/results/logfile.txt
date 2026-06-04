@@ -1,5 +1,5 @@
-***Starting server on port 40509 ***
-Loading net-file from 'intersection/test.net.xml' ... done (1ms).
+***Starting server on port 34381 ***
+Loading net-file from 'intersection/test.net.xml' ... done (2ms).
 Loading additional-files from 'intersection/tl_programs.add.xml' ... done (0ms).
 Warning: Unsafe green phase 4 in tlLogic 'J1', program 'dqn'. Lane '-E6_0' is targeted by 2 'G'-links. (use 'g' instead)
 Warning: Unsafe green phase 4 in tlLogic 'J3', program 'dqn'. Lane 'E9_0' is targeted by 2 'G'-links. (use 'g' instead)
@@ -7,18 +7,14 @@ Warning: Unsafe green phase 6 in tlLogic 'J4', program 'dqn'. Lane 'E4_0' is tar
 Loading route-files incrementally from 'intersection/trips.xml'
 Loading done.
 Simulation version 1.27.0 started with time: 0.00.
-Warning: Vehicle '72' performs emergency braking on lane 'E9_0' with decel=9.00, wished=4.50, severity=1.00, time=2210.00.
-Warning: Vehicle '72' performs emergency stop at the end of lane 'E9_0' because of a red traffic light (decel=-12.55, offset=3.05), time=2210.00.
 Simulation ended at time: 6000.00.
 Reason: TraCI requested termination.
 Performance:
- Duration: 17.88s
- TraCI-Duration: 17.84s
- Real time factor: 335.57
- UPS: 667.058166
+ Duration: 15.96s
+ TraCI-Duration: 15.93s
+ Real time factor: 375.916
+ UPS: 728.651087
 Vehicles:
  Inserted: 200
- Running: 1
+ Running: 2
  Waiting: 0
- Emergency Stops: 1
- Emergency Braking: 1
