@@ -8,13 +8,15 @@ import utils
 import copy
 import sys
 import os
+import glob
 
 from TLAgent import TLAgent
 
 if __name__ == "__main__":
     # --- TRAINING OPTIONS ---
-    learn = True
+    mode = "train"   # "train" | "evaluate"
     gui = False
+    learn = (mode == "train")
 
     # setting the cmd mode or the visual mode
     if gui == False:
@@ -79,13 +81,30 @@ if __name__ == "__main__":
             env = MultiSumoEnv(sumoBinary, max_steps, SUMOCFG,
                                tl_config=tl_config, num_vehicles=num_cars_generated)
 
+            # Load saved models when evaluating
+            model_files = {}
+            if mode == "evaluate":
+                for tl_id in tl_ids:
+                    files = glob.glob(f'results/qmodel_sa_{tl_id}_{experiment}_*.keras')
+                    if not files:
+                        raise FileNotFoundError(
+                            f"No saved SA model for {tl_id} experiment {experiment}. "
+                            "Run in 'train' mode first."
+                        )
+                    model_files[tl_id] = max(
+                        files,
+                        key=lambda f: int(f.rsplit('_', 1)[-1].replace('.keras', ''))
+                    )
+                    print(f"{tl_id}: loading {model_files[tl_id]}")
+
             # One independent TLAgent per intersection — no communication
             agents = {
                 tl_id: TLAgent(
                     env=None, traffic_gen=traffic_gen,
                     max_steps=max_steps, num_experients=num_experiments,
                     total_episodes=total_episodes,
-                    qmodel_filename=None, stats_filename=None,
+                    qmodel_filename=model_files.get(tl_id),
+                    stats_filename=None,
                     stats=stats, init_epoch=0, learn=learn,
                     tl_id=tl_id,
                 )
@@ -217,10 +236,11 @@ if __name__ == "__main__":
                     best_epoch = e
 
                 # Rolling stats checkpoint
-                np.save(f'results/stats_sa_{experiment}_{e}.npy', stats)
+                stats_prefix = 'stats_sa_eval' if mode == 'evaluate' else 'stats_sa'
+                np.save(f'results/{stats_prefix}_{experiment}_{e}.npy', stats)
                 if e > 0:
                     try:
-                        os.remove(f'results/stats_sa_{experiment}_{e - 1}.npy')
+                        os.remove(f'results/{stats_prefix}_{experiment}_{e - 1}.npy')
                     except FileNotFoundError:
                         pass
 
