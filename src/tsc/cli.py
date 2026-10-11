@@ -1,4 +1,4 @@
-"""Command line: tsc train | evaluate | plot | compare | diagnose.
+"""Command line: tsc train | evaluate | plot | compare | diagnose | assign.
 
     tsc train configs/step1/full.toml --seeds 0-4 --workers 5
     tsc evaluate configs/baselines.toml
@@ -68,6 +68,11 @@ def cmd_compare(args):
             f.write(table.to_markdown())
 
 
+def cmd_assign(args):
+    from tsc.experiments.assign import assign
+    assign(_load(args), out_dir=args.out, passes=args.passes)
+
+
 def cmd_diagnose(args):
     from tsc.experiments import diagnose
     cfg = _load(args)
@@ -110,6 +115,11 @@ def build_parser():
     c.add_argument('--metric', default='delay')
     c.add_argument('--out', help='also write the table as Markdown')
     c.set_defaults(func=cmd_compare)
+
+    a = sub.add_parser('assign', help='best fixed controller per junction and demand level')
+    with_config(a)
+    a.add_argument('--passes', type=int, default=2, help='greedy search rounds')
+    a.set_defaults(func=cmd_assign)
 
     d = sub.add_parser('diagnose', help='diagnostics of trained policies')
     d.add_argument('what', choices=['messages'], help='messages: real vs zero vs wrong-neighbour')

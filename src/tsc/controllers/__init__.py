@@ -13,6 +13,8 @@ greenwave_py    : the green-wave plan replayed by Python (SignalHead), the refer
                   plan-controlled RL (same switching mechanics)
 plan_actuated   : coordinated-actuated control on the green-wave plan (gap-based extension,
                   early end of empty greens; controllers.plan)
+select_assigned : best fixed controller per junction and demand level (`tsc assign`,
+                  controllers.select.FixedSelection)
 
 RL policies (controllers.rl) are Python-controlled as well.
 """
@@ -44,10 +46,11 @@ BASELINES = {
     'maxpressure_det': ('python', _detector_maxpressure),
     'greenwave_py': ('python', _plan(PlanController)),
     'plan_actuated': ('python', _plan(PlanActuated)),
+    'select_assigned': ('python', None),       # built by evaluate (needs the assignment)
 }
 
 # Python baselines that run on the green-wave plan (signals.control = 'plan' timing)
-PLAN_BASELINES = ('greenwave_py', 'plan_actuated')
+PLAN_BASELINES = ('greenwave_py', 'plan_actuated', 'select_assigned')
 
 
 def baseline(name, cfg=None, network=None):

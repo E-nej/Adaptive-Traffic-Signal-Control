@@ -5,6 +5,9 @@ What an action means depends on the control mode ([signals] control):
 'stages' : the action is the next green stage (StageActions)
 'plan'   : the junction runs a coordinated plan and the action adjusts it
            (FOLLOW / HOLD / EARLY, see controllers.plan.PlanActions)
+'select' : the action picks which controller runs the junction for the next
+           ~cycle (green wave / coordinated-actuated / max-pressure, see
+           controllers.select.SelectorActions)
 
 With a shared agent (agent.shared) all junctions use one network, trained on
 the transitions of every junction; a one-hot junction id is appended to the
@@ -17,6 +20,7 @@ import numpy as np
 
 from tsc.controllers.base import Controller
 from tsc.controllers.plan import PlanActions
+from tsc.controllers.select import SelectorActions
 
 
 class StageActions:
@@ -32,6 +36,9 @@ class StageActions:
         pass
 
     def reset(self, sim):
+        pass
+
+    def tick(self, sim):
         pass
 
     def decides(self, sim, tl_id):
@@ -52,6 +59,12 @@ def make_actions(network, observer, cfg):
     s = cfg.signals
     if s.control == 'plan':
         return PlanActions(network, interval=s.decision_interval, max_extension=s.max_extension)
+    if s.control == 'select':
+        o = cfg.observation
+        return SelectorActions(network, select_interval=s.select_interval,
+                               interval=s.decision_interval, max_extension=s.max_extension,
+                               noise=o.noise, dropout=o.dropout, e2_length=o.e2_length,
+                               comm=o.comm, seed=cfg.train.seeds[0])
     if s.control == 'stages':
         return StageActions(network, observer)
     raise ValueError(f'Unknown control mode {s.control!r}')
@@ -81,10 +94,15 @@ class RLController(Controller):
 
     @property
     def needs_plan(self):
-        return isinstance(self.actions, PlanActions)
+        return getattr(self.actions, 'needs_plan', False)
 
     def set_plans(self, plans):
         self.actions.set_plans(plans)
+
+    def reseed(self, seed):
+        """Independent sensor noise per evaluation scenario (selector's max-pressure)."""
+        if hasattr(self.actions, 'reseed'):
+            self.actions.reseed(seed)
 
     def reset(self, sim):
         self.obs.reset(sim)
@@ -93,6 +111,7 @@ class RLController(Controller):
 
     def tick(self, sim):
         self.obs.tick(sim)
+        self.actions.tick(sim)
 
     def state(self, sim, tl_id):
         """Policy input: observation, action-space features, junction id (shared agent)."""
