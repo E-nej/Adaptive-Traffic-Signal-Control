@@ -74,6 +74,8 @@ def load_plans(path, network):
         for ph in tl.iter('phase'):
             dur = float(ph.get('duration'))
             state = ph.get('state')
+            if dur <= 0:
+                raise ValueError(f'{path}: phase without duration in {tl_id}')
             if 'y' not in state and any(c in 'Gg' for c in state):
                 if state not in greens:
                     raise ValueError(f'{path}: phase {state!r} of {tl_id} is not a green stage '
