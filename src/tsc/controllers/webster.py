@@ -1,9 +1,25 @@
 """Fixed-time plans for a given demand: Webster (isolated) and a coordinated green wave."""
 
+import math
 import os
 import xml.etree.ElementTree as ET
 
 from tsc import sumo_env
+
+
+def required_cycle(network):
+    """Shortest cycle that gives every stage its minimum green (s), over all junctions.
+
+    tlsCycleAdaptation assigns negative greens when its cycle is shorter than this
+    (low demand at junctions with many stages), so it is used as the minimum cycle.
+    """
+    longest = 0.0
+    for tl_id in network.tl_ids:
+        program = next(iter(network.sumo_net.getTLS(tl_id).getPrograms().values()))
+        intergreen = sum(p.duration for p in program.getPhases()
+                         if 'y' in p.state or not any(c in 'Gg' for c in p.state))
+        longest = max(longest, intergreen + len(network.greens[tl_id]) * network.min_green)
+    return longest
 
 
 def webster_programs(network, route_files, out_file, min_cycle=30, max_cycle=120,
@@ -11,14 +27,21 @@ def webster_programs(network, route_files, out_file, min_cycle=30, max_cycle=120
     """Webster cycle/split optimisation (SUMO tlsCycleAdaptation) → additional file.
 
     unified: one common cycle length for all junctions (needed for coordination).
+    If a green comes out zero or negative (cycle too short for a junction's stages, at
+    low demand), the plan is recomputed with the minimum cycle raised to
+    required_cycle(network).
     """
-    sumo_env.run_tool(
-        'tlsCycleAdaptation.py',
-        '-n', network.net_file, '-r', ','.join(route_files), '-o', out_file,
-        '-b', '0', '-y', str(network.yellow), '-a', str(network.all_red),
-        '-g', str(network.min_green), '--min-cycle', str(min_cycle), '--max-cycle', str(max_cycle),
-        '-p', program_id, *(['-u'] if unified else []),
-    )
+    def run(cycle_min):
+        sumo_env.run_tool(
+            'tlsCycleAdaptation.py',
+            '-n', network.net_file, '-r', ','.join(route_files), '-o', out_file,
+            '-b', '0', '-y', str(network.yellow), '-a', str(network.all_red),
+            '-g', str(network.min_green), '--min-cycle', str(cycle_min),
+            '--max-cycle', str(max_cycle), '-p', program_id, *(['-u'] if unified else []),
+        )
+    run(min_cycle)
+    if any(float(p.get('duration')) <= 0 for p in ET.parse(out_file).getroot().iter('phase')):
+        run(max(min_cycle, math.ceil(required_cycle(network))))
     return out_file
 
 

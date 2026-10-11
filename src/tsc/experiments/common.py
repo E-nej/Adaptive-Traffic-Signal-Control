@@ -63,6 +63,16 @@ def run_parallel(fn, tasks, workers):
             yield fn(t)
         return
     with ProcessPoolExecutor(max_workers=min(workers, len(tasks))) as pool:
-        futures = [pool.submit(fn, t) for t in tasks]
+        futures = [pool.submit(_call, fn, t) for t in tasks]
         for fut in as_completed(futures):
             yield fut.result()
+
+
+def _call(fn, task):
+    """Run fn(task) in a worker; errors come back as RuntimeError with the worker's traceback
+    (some exceptions, e.g. from libsumo, cannot be sent between processes)."""
+    try:
+        return fn(task)
+    except Exception as e:
+        import traceback
+        raise RuntimeError(f'{type(e).__name__}: {e}\n{traceback.format_exc()}') from None
