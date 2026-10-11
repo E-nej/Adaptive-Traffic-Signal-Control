@@ -20,9 +20,9 @@ import numpy as np
 
 from tsc import config as config_mod
 from tsc import seeds as seeds_mod
-from tsc.demand import generate_routes
+from tsc.demand import generate_routes, is_directional, scenario_flip
 from tsc.experiments.common import network_for, run_parallel, save_run_info, sim_kwargs
-from tsc.experiments.runs import make_observer
+from tsc.experiments.runs import make_controller, make_observer
 from tsc.reward import Reward
 from tsc.simulation import Simulation, run_episode
 
@@ -37,7 +37,10 @@ def train(cfg, seeds=None, out_root=None, workers=None):
     for s in seeds:
         seeds_mod.check_train_seed(s)
     out_root = out_root or default_out(cfg)
-    network_for(cfg)            # build the network once before the workers start
+    network = network_for(cfg)  # build the network once before the workers start
+    if cfg.signals.control == 'plan':
+        from tsc.experiments.evaluate import plan_library
+        plan_library(network, cfg)      # and the plans
     tasks = [(config_mod.replace(cfg, train={'seeds': [s]}), os.path.join(out_root, f's{s}'))
              for s in seeds]
     return list(run_parallel(_train_task, tasks, workers or cfg.workers))
@@ -49,16 +52,41 @@ def _train_task(task):
     return out_dir
 
 
-def validate(network, cfg, controller, work_dir):
-    """Mean delay of the greedy policy on the validation scenarios."""
+def validate(network, cfg, controller, work_dir, library=None):
+    """Mean delay of the greedy policy on the validation scenarios.
+
+    Plan control: every scenario runs once with its matching plan and once with the
+    opposite direction's plan of the same level (a plan that does not fit the demand).
+    """
     delays = []
     for i, level in enumerate(cfg.train.val_levels):
         seed = seeds_mod.validation(i)
         route = generate_routes(network, cfg.demand, os.path.join(work_dir, 'val.rou.xml'), seed, level)
-        m = run_episode(network, controller, route, cfg.demand.duration,
-                        os.path.join(work_dir, 'val'), seed=seed, **sim_kwargs(cfg))
-        delays.append(m['delay'])
+        variants = [None]
+        if library is not None:
+            flip = scenario_flip(cfg.demand, seed) if is_directional(cfg.demand) else None
+            near = nearest_level(cfg.train.plan_levels, level)
+            variants = [library[(near, flip)]]
+            if flip is not None:
+                variants.append(library[(near, not flip)])
+        for plans in variants:
+            if plans is not None:
+                controller.set_plans(plans)
+            m = run_episode(network, controller, route, cfg.demand.duration,
+                            os.path.join(work_dir, 'val'), seed=seed, **sim_kwargs(cfg))
+            delays.append(m['delay'])
     return float(np.mean(delays))
+
+
+def nearest_level(levels, level):
+    return min(levels, key=lambda x: abs(x - level))
+
+
+def load_library(network, cfg):
+    """{(level, flip): {tl_id: StagePlan}} of the plan library (plan control)."""
+    from tsc.experiments.evaluate import plan_library
+    from tsc.plans import load_plans
+    return {key: load_plans(path, network) for key, path in plan_library(network, cfg).items()}
 
 
 def train_one(cfg, out_dir):
@@ -75,7 +103,6 @@ def train_one(cfg, out_dir):
     # seed would no longer reproduce the same run.
     import tensorflow as tf
     import tsc.agents.dqn  # noqa: F401
-    from tsc.controllers.rl import RLController, make_agents
     np.random.seed(seed)
     random.seed(seed)
     tf.random.set_seed(seed)
@@ -83,9 +110,12 @@ def train_one(cfg, out_dir):
     network = network_for(cfg)
     observer = make_observer(network, cfg, seed)
     reward_fn = Reward(network, cfg.reward.kind, cfg.reward.neighbour_weight)
-    agents = make_agents(network, observer, cfg.agent)
-    greedy = RLController(agents, observer)
+    greedy = make_controller(network, observer, cfg)
+    agents, actions = greedy.agents, greedy.actions
     rng = np.random.default_rng(seed)
+    library = load_library(network, cfg) if cfg.signals.control == 'plan' else None
+    plan_rng = np.random.default_rng(seed + 31337)      # separate stream: plan choice
+    scale = cfg.reward.scale
 
     log_path = os.path.join(out_dir, 'train_log.csv')
     log = log_file = None
@@ -101,31 +131,42 @@ def train_one(cfg, out_dir):
         route = generate_routes(network, cfg.demand, os.path.join(work_dir, 'train.rou.xml'),
                                 route_seed, level)
 
+        if library is not None:
+            flip = scenario_flip(cfg.demand, route_seed) if is_directional(cfg.demand) else None
+            keys = sorted(library, key=str)
+            if plan_rng.random() < tc.plan_match:
+                key = (nearest_level(tc.plan_levels, level), flip)
+            else:
+                key = keys[plan_rng.integers(len(keys))]
+            greedy.set_plans(library[key])
+
         sim = Simulation(network, route, cfg.demand.duration, os.path.join(work_dir, 'episode'),
                          seed=route_seed, **sim_kwargs(cfg)).start()
         reward_fn.reset()
-        observer.reset(sim)
+        greedy.reset(sim)
         pending = {}
         acc = {tl_id: [0.0, 0] for tl_id in network.tl_ids}
         rewards, losses = [], []
 
         while not sim.done:
             for tl_id in sim.decision_points():
-                agent = agents[tl_id]
-                s = observer.observe(sim, tl_id)
-                mask = observer.action_mask(tl_id)
-                if tl_id in pending:
-                    ps, pa = pending[tl_id]
-                    r = acc[tl_id][0] / max(1, acc[tl_id][1])
-                    agent.store(ps, pa, r, s, mask)
-                    rewards.append(r)
-                    loss = agent.replay()
-                    if loss is not None:
-                        losses.append(loss)
-                a = agent.act(s, mask, epsilon)
-                sim.heads[tl_id].request(a)
-                pending[tl_id] = (s, a)
-                acc[tl_id] = [0.0, 0]
+                if actions.decides(sim, tl_id) or tl_id not in pending:
+                    agent = agents[tl_id]
+                    s = greedy.state(sim, tl_id)
+                    mask = actions.mask(sim, tl_id)
+                    if tl_id in pending:
+                        ps, pa = pending[tl_id]
+                        r = scale * acc[tl_id][0] / max(1, acc[tl_id][1])
+                        agent.store(ps, pa, r, s, mask)
+                        rewards.append(r)
+                        loss = agent.replay()
+                        if loss is not None:
+                            losses.append(loss)
+                    a = agent.act(s, mask, epsilon)
+                    greedy.last[tl_id] = a
+                    pending[tl_id] = (s, a)
+                    acc[tl_id] = [0.0, 0]
+                sim.heads[tl_id].request(actions.stage(sim, tl_id, greedy.last[tl_id]))
             sim.step()
             observer.tick(sim)
             for tl_id, r in reward_fn.all(sim).items():
@@ -138,7 +179,7 @@ def train_one(cfg, out_dir):
                'mean_loss': float(np.mean(losses)) if losses else float('nan'), **m}
 
         if (ep + 1) % tc.val_every == 0 or ep == tc.episodes - 1:
-            val = validate(network, cfg, greedy, work_dir)
+            val = validate(network, cfg, greedy, work_dir, library)
             row['val_delay'] = val
             if val < best_val:
                 best_val = val
