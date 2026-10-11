@@ -65,7 +65,7 @@ def make_observer(network, cfg, seed):
     from tsc.observation import Observer
     o = cfg.observation
     return Observer(network, mode=o.mode, comm=o.comm, noise=o.noise, dropout=o.dropout,
-                    seed=seed, e2_length=o.e2_length)
+                    seed=seed, e2_length=o.e2_length, message=o.message)
 
 
 def load_policy(run_dir, network, which='best'):

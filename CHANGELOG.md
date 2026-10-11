@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `greenwave` baseline (common-cycle Webster + tlsCoordinator offsets); Webster and
   green-wave plans are made per tidal direction.
 
+- Directional messages (`observation.message = "directional"`): what each neighbour knows
+  about the receiver (queue / releases toward it, whether it serves it, spillback from it).
+
 ### Changed
 - Rewards, the queue metric and exact-count max-pressure cover whole approaches, including
   the road before a lane split (e.g. a left-turn bay). No effect on networks without splits.

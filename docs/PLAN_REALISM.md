@@ -170,9 +170,12 @@ communication only "works" if wrong-neighbour messages hurt.
     exact-count max-pressure (shield) 59 / 93 / 178 / 369 / 456 — on 300 m links it counts
     moving vehicles far from the stop line and switches too often (6–11 stops per vehicle).
     Unshielded max-pressure starves the protected-left stage (bays overflow, teleports).
-- [ ] 2E.2 Directional, lane-aligned messages: per incoming link, vehicles the upstream
-      neighbour released toward me (its stop-line loop counts) + whether it currently serves
-      me and for how long; per outgoing link, the downstream queue (spillback).
+- [x] 2E.2 Directional messages (`[observation] message = "directional"`, 5 values per
+      neighbour n → receiver i, all from n's detectors): queue on n's lanes whose movements
+      lead to i, vehicles n released toward i (stop-line loops, ~10 s memory), share of n's
+      links toward i that are green, how long n has served i, and the queue on n's approach
+      coming from i (spillback). `Network.toward` / `arrival` map the movements.
+      Config: `configs/corridor/dir.toml`.
 - [ ] 2E.3 Cooperative reward: r_i + α·Σ r_neighbours (spatial discount, Chu et al. 2019) or a
       pressure reward that includes downstream queues.
 - [ ] 2E.4 Only if 2E.1–2E.3 show neighbour-specific use: parameter sharing + learned attention

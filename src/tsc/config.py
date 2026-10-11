@@ -59,6 +59,7 @@ class SignalConfig:
 class ObservationConfig:
     mode: str = 'grid'                # 'grid' (perfect information) or 'detector'
     comm: bool = True                 # append neighbours' messages
+    message: str = 'aggregate'        # 'aggregate' | 'directional' (see observation.py)
     noise: float = 0.0                # detector noise (std, normalised units)
     dropout: float = 0.0              # probability a detector reading fails
     e2_length: float = 50.0           # m, area detector length before the stop line

@@ -71,3 +71,47 @@ def test_green_wave(corridor, work_root):
     m = run_episode(corridor, None, route, 120, os.path.join(work_root, 'smoke', 'gw'),
                     seed=1, tls='webster', additional=[plan])
     assert m['inserted'] > 0
+
+
+def test_directional_messages(corridor):
+    """Directional messages depend on the receiver and on what the sender is serving."""
+    from tests.test_observation import fake_sim
+    from tsc.observation import DIR_MSG_SIZE, Observer
+    obs = Observer(corridor, mode='detector', comm=True, message='directional')
+    assert obs.dim == obs.local_dim + corridor.max_neighbours * DIR_MSG_SIZE
+    sim = fake_sim(corridor, halting=2)
+    for head in sim.heads.values():
+        head.mode = 'green'
+    s = obs.observe(sim, 'S3')
+    assert s.shape == (obs.dim,)
+    # arterial stage (0) sends through traffic to S4; the protected-left stage (1) sends none
+    sim.heads['S3'].stage = 0
+    assert obs.directional_message(sim, 'S3', 'S4')[2] == 0.5     # 2 of 4 links toward S4
+    sim.heads['S3'].stage = 1
+    assert obs.directional_message(sim, 'S3', 'S4')[2] == 0.0
+    sim.heads['S3'].mode = 'yellow'
+    assert obs.directional_message(sim, 'S3', 'S4')[2] == 0.0
+    # messages to different receivers differ (S3 → S2 vs S3 → S4 use different lanes)
+    sim.heads['S3'].mode = 'green'
+    sim.heads['S3'].stage = 0
+    assert obs.toward_lanes[('S3', 'S2')] != obs.toward_lanes[('S3', 'S4')]
+
+
+@pytest.mark.sumo
+def test_directional_policy_runs(corridor, work_root):
+    from tsc.config import Config
+    from tsc.controllers.rl import RLController, make_agents
+    from tsc.experiments.runs import make_observer
+    from tsc.simulation import run_episode
+    cfg = Config()
+    cfg.observation.mode = 'detector'
+    cfg.observation.message = 'directional'
+    cfg.agent.hidden = [16, 16]
+    demand = DemandConfig(generator='od', profile='flat', duration=90, tidal_share=0.7)
+    route = generate_routes(corridor, demand, os.path.join(work_root, 'dir.rou.xml'), 2, 2500)
+    observer = make_observer(corridor, cfg, seed=0)
+    controller = RLController(make_agents(corridor, observer, cfg.agent), observer, epsilon=0.2)
+    m = run_episode(corridor, controller, route, 90, os.path.join(work_root, 'smoke', 'dir'),
+                    seed=1, max_green=60, max_red=90)
+    assert m['inserted'] > 0
+    assert any(v > 0 for v in observer.released.values())

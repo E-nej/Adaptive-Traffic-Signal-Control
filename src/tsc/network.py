@@ -44,6 +44,9 @@ class Network:
     approach_edges : dict[str, list[str]]
         All upstream-chain edges of a junction's approaches: queues there belong to the
         junction even though those edges are not controlled.
+    toward, arrival : dict[(str, str), list]
+        toward[(a, b)]: link indices of a leading to neighbour b; arrival[(a, b)]: b's
+        controlled incoming lanes on the road from a (for directional messages).
     """
 
     def __init__(self, cfg, work_root):
@@ -100,6 +103,7 @@ class Network:
             for tl_id in self.tl_ids
         }
         self.neighbours = self._neighbours()
+        self.toward, self.arrival = self._directions()
         self.max_neighbours = max((len(v) for v in self.neighbours.values()), default=0)
         self.max_greens = max(len(g) for g in self.greens.values())
         self.max_in_lanes = max(len(l) for l in self.in_lanes.values())
@@ -201,6 +205,46 @@ class Network:
                     else:
                         stack.extend(e.getToNode().getOutgoing())
         return {t: sorted(v) for t, v in neighbours.items()}
+
+    def _directions(self):
+        """Which movements of a junction lead to a neighbour, and where they arrive.
+
+        Returns (toward, arrival):
+            toward[(src, dst)]  : link indices of src whose outgoing road leads to dst
+            arrival[(src, dst)] : dst's controlled incoming lanes on the road from src
+        Roads are followed through unsignalised nodes, but not through dead ends
+        (traffic leaves the network there).
+        """
+        node_tl = {}
+        for tl_id in self.tl_ids:
+            for _, in_lane, _ in self.links[tl_id]:
+                node_tl[self.sumo_net.getLane(in_lane).getEdge().getToNode().getID()] = tl_id
+        toward, arrival = {}, {}
+        for src in self.tl_ids:
+            reach = {}                                    # out edge -> {dst: arrival edges}
+            for out_edge in sorted({lane_edge(l) for l in self.out_lanes[src]}):
+                found = {}
+                seen, stack = set(), [self.sumo_net.getEdge(out_edge)]
+                while stack:
+                    e = stack.pop()
+                    if e.getID() in seen:
+                        continue
+                    seen.add(e.getID())
+                    node = e.getToNode()
+                    dst = node_tl.get(node.getID())
+                    if dst is not None:
+                        if dst != src:
+                            found.setdefault(dst, set()).add(e.getID())
+                    elif node.getType() != 'dead_end':
+                        stack.extend(node.getOutgoing())
+                reach[out_edge] = found
+            for idx, in_lane, out_lane in self.links[src]:
+                for dst, edges in reach[lane_edge(out_lane)].items():
+                    toward.setdefault((src, dst), set()).add(idx)
+                    lanes = {l for l in self.in_lanes[dst] if lane_edge(l) in edges}
+                    arrival.setdefault((src, dst), set()).update(lanes)
+        return ({k: sorted(v) for k, v in toward.items()},
+                {k: sorted(v) for k, v in arrival.items()})
 
 
 def lane_edge(lane_id):
