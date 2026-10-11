@@ -36,10 +36,15 @@ class NetworkConfig:
 
 @dataclass
 class DemandConfig:
-    generator: str = 'random_trips'   # Poisson trips between random O/D edges
+    generator: str = 'random_trips'   # 'random_trips' (closed test network) | 'od'
     profile: str = 'peak'             # see demand.PROFILES
     duration: int = 3600              # s, episode length
     min_distance: float = 150.0       # m, shortest trip
+    # generator 'od' (networks with open boundaries, see demand.py)
+    major_share: float = 0.6          # share of trips between ends of the main road
+    tidal_share: float = 0.5          # share of directional trips going along tidal_axis
+    tidal_axis: list[float] = field(default_factory=lambda: [1.0, 0.0])
+    tidal_random: bool = True         # draw the tidal direction per scenario
 
 
 @dataclass

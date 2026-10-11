@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scenario, 95 % CI, Wilcoxon signed-rank test).
 - `tsc diagnose messages`: evaluates communicating policies with real, zeroed and
   wrong-neighbour messages (`Observer.set_message_mode`).
+- Arterial corridor network (`networks/corridor/`, 7 signals, left-turn bays, cross and
+  residential streets, open boundaries) with configs in `configs/corridor/`.
+- Demand generator `od`: trips between boundary points with a through-traffic share,
+  a gravity model and a tidal direction drawn per scenario.
+- `greenwave` baseline (common-cycle Webster + tlsCoordinator offsets); Webster and
+  green-wave plans are made per tidal direction.
+
+### Changed
+- Rewards, the queue metric and exact-count max-pressure cover whole approaches, including
+  the road before a lane split (e.g. a left-turn bay). No effect on networks without splits.
 
 ## [0.2.0] - Unreleased
 

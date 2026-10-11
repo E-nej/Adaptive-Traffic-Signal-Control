@@ -4,6 +4,7 @@ Baselines
 ---------
 fixed           : netconvert's fixed-time plan, run by SUMO
 webster         : Webster-optimised fixed-time plan, run by SUMO
+greenwave       : coordinated fixed time (common cycle + offsets from tlsCoordinator)
 actuated        : SUMO's gap-based actuated control
 maxpressure     : max-pressure on whole-lane counts (perfect information), Python-controlled
 maxpressure_det : max-pressure on the E2 detectors only, with the noise / dropout of the
@@ -25,6 +26,7 @@ def _detector_maxpressure(cfg):
 BASELINES = {
     'fixed': ('fixed', None),
     'webster': ('webster', None),
+    'greenwave': ('webster', None),      # also a fixed plan from an additional file
     'actuated': ('actuated', None),
     'maxpressure': ('python', lambda cfg: MaxPressure()),
     'maxpressure_det': ('python', _detector_maxpressure),

@@ -1,0 +1,32 @@
+# Corridor RL (full_nocomm): detector observations with noise/dropout, safety shield,
+# multi-objective reward, no communication.
+#   tsc train configs/corridor/full_nocomm.toml --seeds 0-4
+name = "corridor_full_nocomm"
+workers = 5
+
+[network]
+path = "networks/corridor/corridor.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.6
+tidal_share = 0.7
+tidal_random = true
+
+[signals]
+max_green = 60
+max_red = 90
+
+[observation]
+mode = "detector"
+comm = false
+noise = 0.05
+dropout = 0.02
+
+[reward]
+kind = "multi"
+
+[train]
+level_min = 1000.0
+level_max = 4500.0
+val_levels = [2000.0, 4000.0]

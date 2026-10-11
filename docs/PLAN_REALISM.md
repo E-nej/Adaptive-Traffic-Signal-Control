@@ -147,11 +147,29 @@ information.** With uniform random O/D, short links and randomised demand per ep
 junction's message tells the same thing (how busy the network is). Standard check from now on:
 communication only "works" if wrong-neighbour messages hurt.
 
-- [ ] 2E.1 Scenario where neighbours carry information a junction can't see itself: an arterial
-      corridor (6–8 signals, irregular 200–400 m spacing, 2+2 lanes with left-turn bays,
-      secondary cross streets, unsignalised priority junctions for residential streets, open
-      boundaries), O/D flows with dominant through traffic and a tidal direction. New baseline:
-      coordinated fixed-time green wave (SUMO `tlsCoordinator.py`).
+- [~] 2E.1 Scenario where neighbours carry information a junction can't see itself.
+  - [x] Arterial corridor `networks/corridor/` (built by `build.py`): 7 signals S0–S6 at
+        irregular 220–380 m spacing, arterial 2+2 lanes at 50 km/h with 75 m left-turn bays,
+        secondary cross streets (1+1, 40 km/h; T-junctions at S2/S4), 3 residential streets at
+        unsignalised priority junctions, open boundaries. netconvert gives every signal
+        3 stages: arterial through/right (+ permissive left), protected left, cross street.
+  - [x] Demand generator `od`: Poisson trips between boundary points; 60 % through traffic
+        on the arterial, the rest by a capacity-weighted gravity model; tidal 70/30 split,
+        direction drawn per scenario (`demand.scenario_flip`).
+  - [x] Baseline `greenwave`: Webster splits with a common cycle + offsets from SUMO's
+        `tlsCoordinator.py`. Webster and green wave get one plan per tidal direction
+        (time-of-day plans); each scenario runs the plan of its direction.
+  - [x] Approach chains (`Network.upstream_edges` / `approach_edges`): a lane split makes the
+        controlled edge only the last 64 m of an approach. Ground-truth rewards, the queue
+        metric and exact-count max-pressure now cover the whole approach (test network
+        unaffected: identical results).
+  - [ ] Train `configs/corridor/{full,full_nocomm}.toml` (5 seeds) and evaluate vs baselines.
+  - Baseline sweep (4 seeds per level, delay [s]): green wave 48 / 48 / 54 / 70 / 116 at
+    1000–5000 veh/h, best everywhere; Webster 70 / 64 / 74 / 98 / 172; actuated
+    69 / 69 / 76 / 104 / 201; detector max-pressure (shield) 48 / 59 / 71 / 173 / 271;
+    exact-count max-pressure (shield) 59 / 93 / 178 / 369 / 456 — on 300 m links it counts
+    moving vehicles far from the stop line and switches too often (6–11 stops per vehicle).
+    Unshielded max-pressure starves the protected-left stage (bays overflow, teleports).
 - [ ] 2E.2 Directional, lane-aligned messages: per incoming link, vehicles the upstream
       neighbour released toward me (its stop-line loop counts) + whether it currently serves
       me and for how long; per outgoing link, the downstream queue (spillback).

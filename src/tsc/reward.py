@@ -15,7 +15,9 @@ class Reward:
     kind='queue' : -halting vehicles on the approaches
     kind='det_queue' : -jam length (vehicles) seen by the E2 detectors, i.e. a reward
                    a real installation can compute
-    All are divided by the number of incoming lanes.
+    All are divided by the number of incoming lanes.  Ground-truth rewards cover the whole
+    approach: the controlled lanes plus the edge chain before them (network.approach_edges,
+    e.g. the road before a left-turn bay).
     """
 
     def __init__(self, network, kind):
@@ -33,17 +35,21 @@ class Reward:
         lanes = self.network.in_lanes[tl_id]
         if self.kind == 'det_queue':
             return -sum(api.lanearea.getJamLengthVehicle(e2_id(l)) for l in lanes) / len(lanes)
-        halting = sum(api.lane.getLastStepHaltingNumber(l) for l in lanes)
+        chain = self.network.approach_edges[tl_id]
+        halting = (sum(api.lane.getLastStepHaltingNumber(l) for l in lanes)
+                   + sum(api.edge.getLastStepHaltingNumber(e) for e in chain))
         if self.kind == 'queue':
             r = -halting
         else:
-            wait = sum(api.lane.getWaitingTime(l) for l in lanes)
+            wait = (sum(api.lane.getWaitingTime(l) for l in lanes)
+                    + sum(api.edge.getWaitingTime(e) for e in chain))
             d_wait = wait - self.prev_wait[tl_id]
             self.prev_wait[tl_id] = wait
             if self.kind == 'wait':
                 r = -d_wait
             elif self.kind == 'multi':
-                co2 = sum(api.lane.getCO2Emission(l) for l in lanes)
+                co2 = (sum(api.lane.getCO2Emission(l) for l in lanes)
+                       + sum(api.edge.getCO2Emission(e) for e in chain))
                 r = -(0.4 * d_wait + 0.2 * halting + 0.2 * halting + 1e-4 * co2)
             else:
                 raise ValueError(self.kind)

@@ -85,10 +85,13 @@ class Simulation:
         self.t += 1
         for h in self.heads.values():
             h.tick()
-        self._queue_sum += sum(
-            self.api.lane.getLastStepHaltingNumber(l)
-            for tl_id in self.network.tl_ids for l in self.network.in_lanes[tl_id]
-        ) / len(self.network.tl_ids)
+        net = self.network
+        self._queue_sum += (
+            sum(self.api.lane.getLastStepHaltingNumber(l)
+                for tl_id in net.tl_ids for l in net.in_lanes[tl_id])
+            + sum(self.api.edge.getLastStepHaltingNumber(e)
+                  for tl_id in net.tl_ids for e in net.approach_edges[tl_id])
+        ) / len(net.tl_ids)
 
     @property
     def done(self):

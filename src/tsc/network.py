@@ -38,6 +38,12 @@ class Network:
     lane_length, lane_speed : dict[str, float]
     neighbours : dict[str, list[str]]
         Signalised junctions directly connected (through unsignalised nodes).
+    upstream_edges, downstream_edges : dict[str, list[str]]
+        Edge chains before a controlled incoming edge / after an outgoing edge, joined by
+        pass-through nodes (lane splits such as left-turn bays); empty for most networks.
+    approach_edges : dict[str, list[str]]
+        All upstream-chain edges of a junction's approaches: queues there belong to the
+        junction even though those edges are not controlled.
     """
 
     def __init__(self, cfg, work_root):
@@ -76,6 +82,22 @@ class Network:
         self.lane_speed = {
             lane: self.sumo_net.getLane(lane).getSpeed()
             for tl_id in self.tl_ids for lane in self.in_lanes[tl_id]
+        }
+        # Approaches longer than the controlled lanes: a lane split (e.g. a left-turn bay)
+        # leaves an edge chain joined by pass-through nodes before the controlled edge.
+        self.upstream_edges = {}      # controlled incoming edge -> chain before it, nearest first
+        self.downstream_edges = {}    # outgoing edge -> chain after it, nearest first
+        for tl_id in self.tl_ids:
+            for _, in_lane, out_lane in self.links[tl_id]:
+                in_edge = self.sumo_net.getLane(in_lane).getEdge()
+                out_edge = self.sumo_net.getLane(out_lane).getEdge()
+                if in_edge.getID() not in self.upstream_edges:
+                    self.upstream_edges[in_edge.getID()] = self._chain(in_edge, upstream=True)
+                if out_edge.getID() not in self.downstream_edges:
+                    self.downstream_edges[out_edge.getID()] = self._chain(out_edge, upstream=False)
+        self.approach_edges = {
+            tl_id: sorted({e for l in self.in_lanes[tl_id] for e in self.upstream_edges[lane_edge(l)]})
+            for tl_id in self.tl_ids
         }
         self.neighbours = self._neighbours()
         self.max_neighbours = max((len(v) for v in self.neighbours.values()), default=0)
@@ -130,6 +152,27 @@ class Network:
             for in_lane, out_lane, idx in self.sumo_net.getTLS(tl_id).getConnections()
         )
 
+    @staticmethod
+    def _pass_through(node):
+        """A node that only joins two parts of one road (e.g. created by a lane split)."""
+        if node.getType() in ('traffic_light', 'dead_end'):
+            return False
+        inc = [e for e in node.getIncoming() if e.allows('passenger')]
+        out = [e for e in node.getOutgoing() if e.allows('passenger')]
+        return len(inc) == 1 and len(out) == 1
+
+    def _chain(self, edge, upstream):
+        chain, seen = [], {edge.getID()}
+        while True:
+            node = edge.getFromNode() if upstream else edge.getToNode()
+            if not self._pass_through(node):
+                return chain
+            edge = (node.getIncoming() if upstream else node.getOutgoing())[0]
+            if edge.getID() in seen:
+                return chain
+            seen.add(edge.getID())
+            chain.append(edge.getID())
+
     def _neighbours(self):
         """Signalised junctions reachable by following edges through unsignalised nodes.
 
@@ -158,6 +201,11 @@ class Network:
                     else:
                         stack.extend(e.getToNode().getOutgoing())
         return {t: sorted(v) for t, v in neighbours.items()}
+
+
+def lane_edge(lane_id):
+    """Edge id of a lane id ('<edge>_<index>')."""
+    return lane_id.rsplit('_', 1)[0]
 
 
 def _stem(path):

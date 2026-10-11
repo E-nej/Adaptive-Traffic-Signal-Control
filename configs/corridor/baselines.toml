@@ -1,0 +1,30 @@
+# Arterial corridor (step 2E.1): baselines over a demand sweep.
+#   uv run python networks/corridor/build.py      # (re)build the network (committed already)
+#   tsc evaluate configs/corridor/baselines.toml
+# Python-controlled baselines (max-pressure) run with the same safety shield and
+# detector model as the RL runs; fixed / Webster / green wave / actuated run in SUMO.
+name = "corridor_baselines"
+workers = 12
+
+[network]
+path = "networks/corridor/corridor.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.6        # through traffic between the arterial ends
+tidal_share = 0.7        # 70 / 30 split of directional trips (AM-style peak)
+tidal_random = true      # direction drawn per scenario; fixed-time plans exist per direction
+
+[signals]
+max_green = 60
+max_red = 90
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[evaluate]
+baselines = ["fixed", "webster", "greenwave", "actuated", "maxpressure", "maxpressure_det"]
+levels = [1000, 2000, 3000, 4000, 5000]
+n_seeds = 10
