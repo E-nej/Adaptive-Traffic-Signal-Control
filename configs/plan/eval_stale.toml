@@ -1,0 +1,23 @@
+# Step 2F evaluation, stale plan: every level runs the plan made for 3000 veh/h.
+name = "plan_stale"
+workers = 4
+
+[network]
+path = "networks/corridor/corridor.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.6
+tidal_share = 0.7
+tidal_random = true
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[evaluate]
+baselines = ["webster", "greenwave", "greenwave_py", "plan_actuated"]
+levels = [1000, 2000, 3000, 4000, 5000]
+n_seeds = 10
+plan_level = 3000

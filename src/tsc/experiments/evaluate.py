@@ -72,11 +72,14 @@ def prepare(network, cfg, work, plan_names=()):
                 if not os.path.exists(path):
                     generate_routes(network, cfg.demand, path, seed, level, flip=flip)
                 calib.append(path)
-            plans[level][flip] = {
-                name: build(network, calib, os.path.join(
-                    work, 'routes', f'{name}_L{int(level)}{"_" + tag if tag else ""}.add.xml'))
-                for name, build in PLAN_BUILDERS.items() if name in wanted
-            }
+            plans[level][flip] = {}
+            for name, build in PLAN_BUILDERS.items():
+                if name not in wanted:
+                    continue
+                path = os.path.join(work, 'routes',
+                                    f'{name}_L{int(level)}{"_" + tag if tag else ""}.add.xml')
+                # built once (plans are deterministic); parallel training jobs share them
+                plans[level][flip][name] = path if os.path.exists(path) else build(network, calib, path)
     return plans
 
 
