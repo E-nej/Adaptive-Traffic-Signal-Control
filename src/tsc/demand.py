@@ -66,20 +66,22 @@ def random_trips(network, route_file, seed, rate_vph, duration, profile='flat', 
 def boundary_points(network):
     """[(node id, (x, y), source edge, sink edge, road priority, capacity weight)].
 
-    A boundary point is a dead-end node with one road leaving it (source) and one
-    entering it (sink).
+    A boundary point is a dead-end node with one road leaving it (source) and/or one
+    entering it (sink).  Where a one-way road or one carriageway of a dual carriageway
+    is cut (real networks), the node has only a source or only a sink; the other is None.
     """
     net = network.sumo_net
     points = []
     for node in net.getNodes():
         out = [e for e in node.getOutgoing() if e.allows('passenger')]
         inc = [e for e in node.getIncoming() if e.allows('passenger')]
-        if node.getType() != 'dead_end' or len(out) != 1 or len(inc) != 1:
+        if node.getType() != 'dead_end' or len(out) > 1 or len(inc) > 1 or not (out or inc):
             continue
-        src, sink = out[0], inc[0]
-        weight = src.getLaneNumber() * src.getSpeed()
-        points.append((node.getID(), node.getCoord(), src.getID(), sink.getID(),
-                       src.getPriority(), weight))
+        src, sink = (out or [None])[0], (inc or [None])[0]
+        road = src or sink
+        weight = road.getLaneNumber() * road.getSpeed()
+        points.append((node.getID(), node.getCoord(), src and src.getID(), sink and sink.getID(),
+                       road.getPriority(), weight))
     return sorted(points)
 
 
@@ -94,7 +96,7 @@ def od_matrix(network, demand, flip=False):
     major, other = [], []
     for i, o in enumerate(pts):
         for j, d in enumerate(pts):
-            if i == j:
+            if i == j or o[2] is None or d[3] is None:     # origin needs a source, destination a sink
                 continue
             delta = np.subtract(d[1], o[1])
             if np.hypot(*delta) < demand.min_distance:
