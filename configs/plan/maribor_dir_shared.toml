@@ -1,0 +1,41 @@
+# Step 2F on the Maribor Titova district: RL adjusts the green-wave plan, directional
+# neighbour messages, one network shared by all junctions (the best corridor setup).
+#   tsc train configs/plan/maribor_dir_shared.toml --seeds 0-2
+name = "plan_maribor_dir_shared"
+workers = 3
+
+[network]
+path = "networks/maribor/titova.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.2
+tidal_share = 0.7
+tidal_axis = [0.0, 1.0]
+tidal_random = true
+min_distance = 300.0
+
+[signals]
+control = "plan"
+decision_interval = 5
+max_extension = 20
+
+[observation]
+mode = "detector"
+comm = true
+message = "directional"
+noise = 0.05
+dropout = 0.02
+
+[reward]
+kind = "multi"
+
+[agent]
+shared = true
+
+[train]
+level_min = 2000.0
+level_max = 8000.0
+val_levels = [3000.0, 6000.0, 8000.0]
+plan_levels = [2000.0, 4000.0, 6000.0, 7000.0, 8000.0]
+plan_match = 0.5
