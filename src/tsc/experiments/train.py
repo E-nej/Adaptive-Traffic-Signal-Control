@@ -70,11 +70,15 @@ def train_one(cfg, out_dir):
     work_dir = os.path.join(out_dir, 'work')
     os.makedirs(work_dir, exist_ok=True)
 
+    # Import TensorFlow/Keras *before* seeding, as the pre-package train.py did: importing
+    # them after seeding shifts the RNG streams (weights, replay sampling), so the same
+    # seed would no longer reproduce the same run.
+    import tensorflow as tf
+    import tsc.agents.dqn  # noqa: F401
+    from tsc.controllers.rl import RLController, make_agents
     np.random.seed(seed)
     random.seed(seed)
-    import tensorflow as tf
     tf.random.set_seed(seed)
-    from tsc.controllers.rl import RLController, make_agents
 
     network = network_for(cfg)
     observer = make_observer(network, cfg, seed)
