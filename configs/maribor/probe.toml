@@ -1,0 +1,29 @@
+# Maribor Titova district (step 3): demand probe, which levels are realistic (no gridlock).
+#   tsc evaluate configs/maribor/probe.toml
+name = "maribor_probe"
+workers = 4
+
+[network]
+path = "networks/maribor/titova.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.2        # through traffic between the trunk ends (the eastern bypass)
+tidal_share = 0.7
+tidal_axis = [0.0, 1.0]  # tidal direction north-south, along Titova cesta
+tidal_random = true
+min_distance = 300.0
+
+[signals]
+max_green = 60
+max_red = 90
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[evaluate]
+baselines = ["fixed", "webster", "greenwave", "actuated", "maxpressure_det"]
+levels = [1500, 3000, 4500, 6000]
+n_seeds = 2

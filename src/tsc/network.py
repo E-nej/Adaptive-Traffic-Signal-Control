@@ -10,11 +10,17 @@ incoming lanes and green stages; observations pad to the largest junction.
 """
 
 import hashlib
+import heapq
 import json
 import os
 
 from tsc import sumo_env
 import sumolib  # type: ignore  # noqa: E402  (sumo_env puts SUMO's tools on sys.path)
+
+# Signals further apart than this (m of road, through unsignalised junctions) are not
+# neighbours.  Synthetic networks are far below it; in real networks with sparse signals
+# it keeps a junction's neighbours to the ones traffic actually travels between.
+NEIGHBOUR_RANGE = 1000.0
 
 
 class Network:
@@ -190,20 +196,9 @@ class Network:
         neighbours = {t: set() for t in self.tl_ids}
         for node_id, tl_id in sorted(node_tl.items()):
             for edge in self.sumo_net.getNode(node_id).getOutgoing():
-                seen = set()
-                stack = [edge]
-                while stack:
-                    e = stack.pop()
-                    if e.getID() in seen:
-                        continue
-                    seen.add(e.getID())
-                    to_tl = node_tl.get(e.getToNode().getID())
-                    if to_tl is not None:
-                        if to_tl != tl_id:
-                            neighbours[tl_id].add(to_tl)
-                            neighbours[to_tl].add(tl_id)
-                    else:
-                        stack.extend(e.getToNode().getOutgoing())
+                for to_tl in _reach([edge], node_tl, tl_id, through_dead_ends=True):
+                    neighbours[tl_id].add(to_tl)
+                    neighbours[to_tl].add(tl_id)
         return {t: sorted(v) for t, v in neighbours.items()}
 
     def _directions(self):
@@ -223,21 +218,8 @@ class Network:
         for src in self.tl_ids:
             reach = {}                                    # out edge -> {dst: arrival edges}
             for out_edge in sorted({lane_edge(l) for l in self.out_lanes[src]}):
-                found = {}
-                seen, stack = set(), [self.sumo_net.getEdge(out_edge)]
-                while stack:
-                    e = stack.pop()
-                    if e.getID() in seen:
-                        continue
-                    seen.add(e.getID())
-                    node = e.getToNode()
-                    dst = node_tl.get(node.getID())
-                    if dst is not None:
-                        if dst != src:
-                            found.setdefault(dst, set()).add(e.getID())
-                    elif node.getType() != 'dead_end':
-                        stack.extend(node.getOutgoing())
-                reach[out_edge] = found
+                reach[out_edge] = _reach([self.sumo_net.getEdge(out_edge)], node_tl, src,
+                                         through_dead_ends=False)
             for idx, in_lane, out_lane in self.links[src]:
                 for dst, edges in reach[lane_edge(out_lane)].items():
                     toward.setdefault((src, dst), set()).add(idx)
@@ -245,6 +227,31 @@ class Network:
                     arrival.setdefault((src, dst), set()).update(lanes)
         return ({k: sorted(v) for k, v in toward.items()},
                 {k: sorted(v) for k, v in arrival.items()})
+
+
+def _reach(start_edges, node_tl, src, through_dead_ends):
+    """{signal: edges arriving at it} for the signals (other than `src`) reachable from
+    `start_edges` through unsignalised nodes within NEIGHBOUR_RANGE m (the start edges
+    themselves always count).  node_tl maps node id -> signal id."""
+    found, done = {}, set()
+    heap = [(e.getLength(), e.getID(), e) for e in start_edges]
+    heapq.heapify(heap)
+    while heap:
+        dist, eid, e = heapq.heappop(heap)
+        if eid in done:
+            continue
+        done.add(eid)
+        node = e.getToNode()
+        dst = node_tl.get(node.getID())
+        if dst is not None:
+            if dst != src:
+                found.setdefault(dst, set()).add(eid)
+        elif through_dead_ends or node.getType() != 'dead_end':
+            for nxt in node.getOutgoing():
+                d = dist + nxt.getLength()
+                if d <= NEIGHBOUR_RANGE and nxt.getID() not in done:
+                    heapq.heappush(heap, (d, nxt.getID(), nxt))
+    return found
 
 
 def lane_edge(lane_id):
