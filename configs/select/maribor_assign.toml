@@ -1,0 +1,33 @@
+# Step 2G baseline on Maribor: best fixed controller per junction and demand level.
+#   tsc assign configs/select/maribor_assign.toml
+#   tsc evaluate configs/select/maribor_assign.toml
+name = "select_maribor_assign"
+workers = 6
+
+[network]
+path = "networks/maribor/titova.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.2
+tidal_share = 0.7
+tidal_axis = [0.0, 1.0]
+tidal_random = true
+min_distance = 300.0
+
+[signals]
+decision_interval = 5
+max_extension = 20
+max_red = 150
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[evaluate]
+baselines = ["select_assigned"]
+levels = [2000, 4000, 6000, 7000, 8000]
+n_seeds = 10
+n_calibration = 2
+assignment = "outputs/assign/select_maribor_assign/assignment.json"
