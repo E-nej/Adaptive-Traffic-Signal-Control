@@ -1,0 +1,27 @@
+# Maribor, wrong-direction plans: every fixed-time plan runs the other tidal direction's
+# plan (the AM plan in the PM peak).
+#   tsc evaluate configs/maribor/opposite.toml
+name = "maribor_opposite"
+workers = 3
+
+[network]
+path = "networks/maribor/titova.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.2
+tidal_share = 0.7
+tidal_axis = [0.0, 1.0]
+tidal_random = true
+min_distance = 300.0
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[evaluate]
+baselines = ["webster", "greenwave", "greenwave_py", "plan_actuated"]
+levels = [2000, 4000, 6000, 7000, 8000]
+n_seeds = 10
+plan_direction = "opposite"
