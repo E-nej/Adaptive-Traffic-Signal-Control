@@ -1,0 +1,33 @@
+# Maribor Titova cesta district (step 3): baselines over a demand sweep.
+#   uv run python networks/maribor/build.py      # (re)build the network (committed already)
+#   tsc evaluate configs/maribor/baselines.toml
+# Demand probe (2 scenarios per level): no congestion up to 6000 veh/h, saturation
+# around 8000, gridlock from 10000 (teleports, < 80 % of trips finish).
+name = "maribor_baselines"
+workers = 3
+
+[network]
+path = "networks/maribor/titova.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.2        # through traffic between the trunk ends (the eastern bypass)
+tidal_share = 0.7
+tidal_axis = [0.0, 1.0]  # tidal direction north-south, along Titova cesta
+tidal_random = true
+min_distance = 300.0
+
+[signals]
+max_green = 60
+max_red = 90
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[evaluate]
+baselines = ["fixed", "webster", "greenwave", "actuated", "maxpressure_det",
+             "greenwave_py", "plan_actuated"]
+levels = [2000, 4000, 6000, 7000, 8000]
+n_seeds = 10
