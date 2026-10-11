@@ -10,6 +10,19 @@ import sys
 # ---------------------------------------------------------------------------
 
 def _setup_sumo_path():
+    # pip-installed SUMO (`pip install eclipse-sumo`) ships its own SUMO_HOME
+    if not os.environ.get('SUMO_HOME'):
+        try:
+            import sumo
+            os.environ['SUMO_HOME'] = sumo.SUMO_HOME
+        except ImportError:
+            pass
+    s_h = os.environ.get('SUMO_HOME')
+    if s_h:
+        bin_dir = os.path.join(s_h, 'bin')
+        if os.path.isdir(bin_dir) and bin_dir not in os.environ.get('PATH', ''):
+            os.environ['PATH'] = bin_dir + os.pathsep + os.environ.get('PATH', '')
+
     candidates = [
         '/usr/share/sumo/tools',
         'C:\\Program Files (x86)\\Eclipse\\Sumo\\tools',
