@@ -1,0 +1,39 @@
+# Step 2F round 2: the best corridor setup (directional messages, shared network) with
+# 5 seeds and 300 episodes (validation was still improving at 150).
+#   tsc train configs/plan/dir_shared_long.toml --seeds 0-4
+name = "plan_dir_shared_long"
+workers = 5
+
+[network]
+path = "networks/corridor/corridor.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.6
+tidal_share = 0.7
+tidal_random = true
+
+[signals]
+control = "plan"
+decision_interval = 5
+max_extension = 20
+
+[observation]
+mode = "detector"
+comm = true
+message = "directional"
+noise = 0.05
+dropout = 0.02
+
+[reward]
+kind = "multi"
+
+[train]
+level_min = 1000.0
+level_max = 5000.0
+val_levels = [1500.0, 3000.0, 4500.0]
+plan_match = 0.5
+episodes = 300
+
+[agent]
+shared = true
