@@ -141,14 +141,18 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 
 ## How to run
 
+Since v0.2.0 everything runs through the `tsc` package (see the README):
+
 ```bash
-cd Deep-Qlearning-TSC
-python evaluate.py --out runs/eval/baselines.csv                       # baselines only
-python train.py --config full --seed 0 --out runs/train/full_s0       # step 1 training
-python train.py --config det_queue --seed 0 --obs detector --noise 0.05 --dropout 0.02        --max-green 60 --max-red 90 --out runs/train2/det_queue_s0     # step 2 training
-python evaluate.py --baselines --runs "runs/train/*" --out runs/eval/rl.csv
-python plot_eval.py runs/eval/baselines.csv runs/eval/rl.csv --out runs/eval/plots
+uv run tsc evaluate configs/baselines.toml                       # baselines only
+uv run tsc train configs/step1/full.toml --seeds 0-4             # step 1 training
+uv run tsc train configs/step2/det_queue.toml --seeds 0-4        # step 2 training
+uv run tsc evaluate configs/step1/evaluate.toml                  # trained runs
+uv run tsc plot outputs/eval/baselines/results.csv outputs/eval/step1/results.csv --out outputs/plots/step1
 ```
+
+Runs trained with the pre-package scripts (`Deep-Qlearning-TSC/runs/train*/…`) can be
+evaluated with `--runs "<dir>/*"`; they are loaded from their `config.json`.
 
 ## Log
 - 2026-10-11: plan written, branch `realism` created from `origin/multiagent`.
@@ -156,3 +160,6 @@ python plot_eval.py runs/eval/baselines.csv runs/eval/rl.csv --out runs/eval/plo
   Max-pressure is the strongest baseline near/over saturation; actuated ≈ max-pressure at low
   demand; Webster is worse than a 40 s fixed plan once oversaturated (spillback on ~100 m links).
   Step 1 and step 2 RL training launched (5 seeds × 4 + 5 seeds × 3 configs).
+- 2026-10-11: refactor into the `tsc` package (v0.2.0, branch `refactor-v0.2`,
+  see [REFACTOR.md](REFACTOR.md)). Baseline sweep, observations/rewards, trained-policy
+  evaluation and short training runs reproduce the pre-package scripts exactly.
