@@ -1,22 +1,22 @@
-"""Non-learning Python controllers (SUMO-native baselines live in sim.py)."""
+"""Max-pressure control (Varaiya 2013), lane-level variant."""
+
+from tsc.controllers.base import Controller
 
 
-class MaxPressure:
-    """Max-pressure control (Varaiya 2013), lane-level variant.
-
-    Pressure of a stage = vehicles on the incoming lanes it serves minus
+class MaxPressure(Controller):
+    """Pressure of a stage = vehicles on the incoming lanes it serves minus
     vehicles on the outgoing lanes it feeds.  At every decision point the
     stage with the highest pressure gets (or keeps) the green.
     """
 
     def reset(self, sim):
-        scn = sim.scn
+        net = sim.network
         self.served = {}
-        for tl_id in scn.tl_ids:
+        for tl_id in net.tl_ids:
             per_stage = []
-            for state in scn.greens[tl_id]:
+            for state in net.greens[tl_id]:
                 ins, outs = set(), set()
-                for idx, in_lane, out_lane in scn.links[tl_id]:
+                for idx, in_lane, out_lane in net.links[tl_id]:
                     if state[idx] in 'Gg':
                         ins.add(in_lane)
                         outs.add(out_lane)

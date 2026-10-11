@@ -13,26 +13,36 @@ from collections import deque
 import numpy as np
 import tensorflow as tf
 
-_threads = int(os.environ.get('RTSC_TF_THREADS', '1'))
+# One thread per process: experiments run many processes in parallel, and TensorFlow's
+# default (all cores per process) makes them slow each other down badly.
+_threads = int(os.environ.get('TSC_TF_THREADS', '1'))
 tf.config.threading.set_intra_op_parallelism_threads(_threads)
 tf.config.threading.set_inter_op_parallelism_threads(_threads)
 
 from tensorflow import keras  # noqa: E402
 
 
-def build_qnet(n_in, n_out):
-    return keras.Sequential([
-        keras.Input(shape=(n_in,)),
-        keras.layers.Dense(400),
-        keras.layers.Dense(400, activation='relu'),
-        keras.layers.Dense(n_out, activation='linear'),
-    ])
+def build_qnet(n_in, n_out, hidden=(400, 400)):
+    """The paper's network: first hidden layer linear, the others ReLU, linear output."""
+    layers = [keras.Input(shape=(n_in,))]
+    for i, units in enumerate(hidden):
+        layers.append(keras.layers.Dense(units, activation=None if i == 0 else 'relu'))
+    layers.append(keras.layers.Dense(n_out, activation='linear'))
+    return keras.Sequential(layers)
 
 
 class DQNAgent:
+    @classmethod
+    def from_config(cls, n_states, n_actions, cfg):
+        """cfg: config.AgentConfig."""
+        return cls(n_states, n_actions, double=cfg.double, target_update=cfg.target_update,
+                   tau=cfg.tau, hard_every=cfg.hard_every, gamma=cfg.gamma, lr=cfg.lr,
+                   batch_size=cfg.batch_size, buffer_size=cfg.buffer_size,
+                   learn_start=cfg.learn_start, hidden=tuple(cfg.hidden))
+
     def __init__(self, n_states, n_actions, double=True, target_update='soft',
                  tau=0.005, hard_every=1000, gamma=0.95, lr=2.5e-4,
-                 batch_size=100, buffer_size=50000, learn_start=500):
+                 batch_size=100, buffer_size=50000, learn_start=500, hidden=(400, 400)):
         self.n_states = n_states
         self.n_actions = n_actions
         self.double = double
@@ -45,8 +55,8 @@ class DQNAgent:
         self.buffer = deque(maxlen=buffer_size)
         self.grad_steps = 0
 
-        self.q = build_qnet(n_states, n_actions)
-        self.q_target = build_qnet(n_states, n_actions)
+        self.q = build_qnet(n_states, n_actions, hidden)
+        self.q_target = build_qnet(n_states, n_actions, hidden)
         self.q_target.set_weights(self.q.get_weights())
         self.opt = keras.optimizers.Adam(learning_rate=lr, clipnorm=1.0)
         self.huber = keras.losses.Huber()

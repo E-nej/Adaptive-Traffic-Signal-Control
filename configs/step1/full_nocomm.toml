@@ -1,0 +1,11 @@
+# Step 1 ablation: VA without communication.
+#   tsc train configs/step1/full_nocomm.toml --seeds 0-4
+name = "full_nocomm"
+workers = 5
+
+[observation]
+mode = "grid"
+comm = false
+
+[reward]
+kind = "multi"

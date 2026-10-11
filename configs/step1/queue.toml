@@ -1,0 +1,11 @@
+# Step 1 ablation: VA with reward = -queue.
+#   tsc train configs/step1/queue.toml --seeds 0-4
+name = "queue"
+workers = 5
+
+[observation]
+mode = "grid"
+comm = true
+
+[reward]
+kind = "queue"

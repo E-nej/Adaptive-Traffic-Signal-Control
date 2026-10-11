@@ -2,18 +2,20 @@
 
 Controllers only choose the next green stage.  SignalHead enforces what a
 real signal controller enforces: minimum green, yellow and all-red
-intergreens, and (optionally) a maximum green.
+intergreens, and optionally a safety shield (maximum green, maximum red).
+
+SignalHead is pure timing logic: the signal state is written through the
+`apply(state)` callback, so it can be tested without SUMO.
 """
 
 GREEN, YELLOW, ALL_RED = 'green', 'yellow', 'all_red'
 
 
 class SignalHead:
-    def __init__(self, api, tl_id, greens, yellow=3, all_red=2,
+    def __init__(self, greens, apply, yellow=3, all_red=2,
                  min_green=10, decision_interval=5, max_green=None, max_red=None):
-        self.api = api
-        self.tl_id = tl_id
         self.greens = greens
+        self.apply = apply
         self.yellow = yellow
         self.all_red = all_red
         self.min_green = min_green
@@ -97,4 +99,5 @@ class SignalHead:
         )
 
     def _apply(self, state):
-        self.api.trafficlight.setRedYellowGreenState(self.tl_id, state)
+        self.state = state
+        self.apply(state)

@@ -1,0 +1,9 @@
+# Step 1 evaluation of the trained runs (baselines: configs/baselines.toml).
+#   tsc evaluate configs/step1/evaluate.toml
+name = "step1"
+workers = 6
+
+[evaluate]
+baselines = []
+runs = ["outputs/train/base/s*", "outputs/train/full/s*", "outputs/train/full_nocomm/s*",
+        "outputs/train/queue/s*"]

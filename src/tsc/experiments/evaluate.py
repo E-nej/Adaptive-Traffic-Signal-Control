@@ -1,130 +1,129 @@
 """Evaluate baselines and trained RL runs over a demand sweep.
 
-Example:
-    python evaluate.py --runs runs/train/* --out runs/eval/step1.csv
+    tsc evaluate configs/baselines.toml
+    tsc evaluate configs/step1/evaluate.toml --runs "outputs/train/full/s*"
 
-Every controller is run on the same routes: for each demand level, --seeds
-held-out scenario seeds (900000+).  The Webster plan for a level is computed
-from separate calibration seeds (800000+), like an engineer designing a plan
+Every controller is run on the same routes: for each demand level, n_seeds
+held-out scenarios (900000+).  The Webster plan for a level is computed from
+separate calibration scenarios (800000+), like an engineer designing a plan
 for typical peak-hour demand.
+
+Output: <out>/results.csv (one row per controller × level × scenario), plus
+config.toml / run_info.json; routes and SUMO outputs are kept under <out>/.
 """
 
-import argparse
 import csv
 import glob
 import os
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from scenario import Scenario
-from sim import run_controller
+from tsc import seeds as seeds_mod
+from tsc.controllers import BASELINES, baseline
+from tsc.controllers.webster import webster_programs
+from tsc.demand import generate_routes
+from tsc.experiments.common import network_for, run_parallel, save_run_info, sim_kwargs
+from tsc.experiments.runs import is_run_dir, load_policy
+from tsc.simulation import run_episode
 
-SCENARIO_DIR = os.path.join('runs', 'scenario')
+
+def default_out(cfg):
+    return os.path.join(cfg.output_dir, 'eval', cfg.name)
 
 
 def route_path(work, level, seed):
     return os.path.join(work, 'routes', f'L{int(level)}_s{seed}.rou.xml')
 
 
-def prepare(scn, work, levels, n_seeds, duration, profile):
+def prepare(network, cfg, work):
+    """Generate evaluation + calibration routes (once) and the Webster plan of every level."""
+    ec = cfg.evaluate
     os.makedirs(os.path.join(work, 'routes'), exist_ok=True)
     webster = {}
-    for level in levels:
-        for i in range(n_seeds):
-            seed = 900000 + i
+    for level in ec.levels:
+        for i in range(ec.n_seeds):
+            seed = seeds_mod.evaluation(i)
             if not os.path.exists(route_path(work, level, seed)):
-                scn.generate_routes(route_path(work, level, seed), seed, level, duration, profile)
+                generate_routes(network, cfg.demand, route_path(work, level, seed), seed, level)
         calib = []
-        for i in range(3):
-            seed = 800000 + i
+        for i in range(ec.n_calibration):
+            seed = seeds_mod.calibration(i)
             if not os.path.exists(route_path(work, level, seed)):
-                scn.generate_routes(route_path(work, level, seed), seed, level, duration, profile)
+                generate_routes(network, cfg.demand, route_path(work, level, seed), seed, level)
             calib.append(route_path(work, level, seed))
-        webster[level] = scn.webster_programs(
-            calib, os.path.join(work, 'routes', f'webster_L{int(level)}.add.xml'))
+        if 'webster' in ec.baselines:
+            webster[level] = webster_programs(
+                network, calib, os.path.join(work, 'routes', f'webster_L{int(level)}.add.xml'))
     return webster
 
 
+def find_runs(patterns):
+    return sorted({os.path.normpath(d) for pattern in patterns for d in glob.glob(pattern)
+                   if is_run_dir(d)})
+
+
 def run_task(task):
-    """One controller at one demand level over all evaluation seeds (runs in a worker)."""
-    name, run_dir, level, n_seeds, duration, work, webster_file, net, shield, tag = task
-    scn = Scenario(net, SCENARIO_DIR)
-    meta = {'controller': name, 'config': name, 'train_seed': ''}
-    controller, tls, additional = None, 'python', None
-    if name == 'fixed':
-        tls = 'fixed'
-    elif name == 'webster':
-        tls, additional = 'webster', [webster_file]
-    elif name == 'actuated':
-        tls = 'actuated'
-    elif name == 'maxpressure':
-        from controllers import MaxPressure
-        controller = MaxPressure()
+    """One controller at one demand level over all evaluation scenarios (runs in a worker)."""
+    cfg, name, run_dir, level, work, webster_file = task
+    ec = cfg.evaluate
+    network = network_for(cfg)
+    kwargs = sim_kwargs(cfg)
+    additional = None
+    if run_dir is None:
+        tls, controller = baseline(name)
+        meta = {'controller': name, 'config': name, 'train_seed': ''}
+        if name == 'webster':
+            additional = [webster_file]
     else:
-        from train import load_run
-        controller, run_meta = load_run(run_dir, scn, which='best')
-        if not any(shield.values()):
-            from train import shield_kwargs
-            shield = shield_kwargs(run_meta)
-        meta = {'controller': name, 'config': run_meta['config'], 'train_seed': run_meta['seed']}
+        tls = 'python'
+        controller, run_cfg = load_policy(run_dir, network, which=ec.which)
+        if cfg.signals.max_green is None and cfg.signals.max_red is None:
+            # no shield set for the evaluation: use the one the run was trained with
+            kwargs.update(max_green=run_cfg.signals.max_green, max_red=run_cfg.signals.max_red)
+        seed = run_cfg.train.seeds[0]
+        meta = {'controller': f'{run_cfg.name}_s{seed}', 'config': run_cfg.name, 'train_seed': seed}
+    if tls != 'python':
+        kwargs = {}
 
     rows = []
-    for i in range(n_seeds):
-        seed = 900000 + i
-        out_dir = os.path.join(work, 'tmp', f'{name}{tag}_L{int(level)}_s{seed}')
-        m = run_controller(scn, controller, route_path(work, level, seed), duration, out_dir,
-                           seed=seed, tls=tls, additional=additional,
-                           **(shield if tls == 'python' else {}))
-        rows.append({**meta, 'controller': meta['controller'] + tag, 'config': meta['config'] + tag,
-                     'level': level, 'eval_seed': seed, **m})
+    for i in range(ec.n_seeds):
+        seed = seeds_mod.evaluation(i)
+        out_dir = os.path.join(work, 'tmp', f"{meta['controller']}{ec.tag}_L{int(level)}_s{seed}")
+        m = run_episode(network, controller, route_path(work, level, seed), cfg.demand.duration,
+                        out_dir, seed=seed, tls=tls, additional=additional, **kwargs)
+        rows.append({**meta, 'controller': meta['controller'] + ec.tag,
+                     'config': meta['config'] + ec.tag, 'level': level, 'eval_seed': seed, **m})
     return rows
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument('--runs', nargs='*', default=[], help='trained run directories (globs ok)')
-    p.add_argument('--baselines', nargs='*', default=['fixed', 'webster', 'actuated', 'maxpressure'])
-    p.add_argument('--levels', nargs='*', type=float, default=[600, 1200, 1800, 2400, 3000, 3600])
-    p.add_argument('--seeds', type=int, default=10)
-    p.add_argument('--duration', type=int, default=3600)
-    p.add_argument('--profile', default='peak')
-    p.add_argument('--workers', type=int, default=8)
-    p.add_argument('--max-green', type=int, default=None, help='shield for Python controllers')
-    p.add_argument('--max-red', type=int, default=None)
-    p.add_argument('--tag', default='', help='suffix for controller names (e.g. _shield)')
-    p.add_argument('--net', default='intersection/test.net.xml')
-    p.add_argument('--out', default='runs/eval/eval.csv')
-    args = p.parse_args()
+def evaluate(cfg, out_dir=None, workers=None):
+    ec = cfg.evaluate
+    for name in ec.baselines:
+        if name not in BASELINES:
+            raise ValueError(f'Unknown baseline {name!r}; choose from {sorted(BASELINES)}')
+    work = out_dir or default_out(cfg)
+    save_run_info(cfg, work)
+    network = network_for(cfg)
+    webster = prepare(network, cfg, work)
 
-    work = os.path.dirname(args.out) or '.'
-    scn = Scenario(args.net, SCENARIO_DIR)
-    webster = prepare(scn, work, args.levels, args.seeds, args.duration, args.profile)
-
-    run_dirs = sorted({d for pattern in args.runs for d in glob.glob(pattern)
-                       if os.path.exists(os.path.join(d, 'config.json'))})
-    controllers = [(b, None) for b in args.baselines] + \
-                  [(os.path.basename(os.path.normpath(d)), d) for d in run_dirs]
-    shield = {'max_green': args.max_green, 'max_red': args.max_red}
-    tasks = [(name, d, level, args.seeds, args.duration, work, webster[level], args.net, shield,
-              args.tag)
-             for name, d in controllers for level in args.levels]
+    run_dirs = find_runs(ec.runs)
+    if ec.runs and not run_dirs:
+        raise FileNotFoundError(f'No run directories match {ec.runs}')
+    controllers = [(b, None) for b in ec.baselines] + [(None, d) for d in run_dirs]
+    tasks = [(cfg, name, d, level, work, webster.get(level))
+             for name, d in controllers for level in ec.levels]
 
     rows = []
-    with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        futures = [pool.submit(run_task, t) for t in tasks]
-        for n, fut in enumerate(as_completed(futures), 1):
-            part = fut.result()
-            rows.extend(part)
-            r = part[0]
-            print(f"[{n}/{len(tasks)}] {r['controller']:20s} level {r['level']:6.0f} "
-                  f"delay {sum(x['delay'] for x in part) / len(part):8.1f}", flush=True)
+    for n, part in enumerate(run_parallel(run_task, tasks, workers or cfg.workers), 1):
+        rows.extend(part)
+        r = part[0]
+        print(f"[{n}/{len(tasks)}] {r['controller']:20s} level {r['level']:6.0f} "
+              f"delay {sum(x['delay'] for x in part) / len(part):8.1f}", flush=True)
 
     rows.sort(key=lambda r: (r['controller'], r['level'], r['eval_seed']))
-    with open(args.out, 'w', newline='') as f:
+    out_csv = os.path.join(work, 'results.csv')
+    with open(out_csv, 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader()
         w.writerows(rows)
-    print(f'wrote {len(rows)} rows to {args.out}')
+    print(f'wrote {len(rows)} rows to {out_csv}')
+    return out_csv
 
-
-if __name__ == '__main__':
-    main()
