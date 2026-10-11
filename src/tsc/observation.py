@@ -26,7 +26,7 @@ queues are lane halting counts.
 
 import numpy as np
 
-from tsc.detectors import e1_id, e2_id
+from tsc.detectors import e1_id, e2_capacity, e2_id
 
 VEH_SPACE = 7.5            # m per queued vehicle (length + gap)
 CELL_BOUNDS = [7, 14, 21, 28, 40, 55, 70, 90, 110]   # m from the stop line → 10 cells
@@ -71,8 +71,8 @@ class Observer:
         self.dropout = dropout
         self.rng = np.random.default_rng(seed)
         self.cap = {l: max(1.0, network.lane_length[l] / VEH_SPACE) for l in network.lane_length}
-        self.e2_cap = {l: max(1.0, min(e2_length, network.lane_length[l]) / VEH_SPACE)
-                       for l in network.lane_length}
+        self.e2_cap = {l: e2_capacity(network, l, e2_length)
+                       for tl_id in network.tl_ids for l in network.in_lanes[tl_id]}
         per_lane = N_CELLS + 1 if mode == 'grid' else DET_FEATS
         self.local_dim = network.max_in_lanes * per_lane + network.max_greens + 1
         self.dim = self.local_dim + (network.max_neighbours * self.msg_size if comm else 0)

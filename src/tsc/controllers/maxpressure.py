@@ -3,9 +3,8 @@
 import numpy as np
 
 from tsc.controllers.base import Controller
-from tsc.detectors import e2_id
+from tsc.detectors import e2_capacity, e2_id
 from tsc.network import lane_edge
-from tsc.observation import VEH_SPACE
 
 
 class MaxPressure(Controller):
@@ -111,8 +110,7 @@ class DetectorMaxPressure(MaxPressure):
         net = sim.network
         self.rng = np.random.default_rng(self.seed)
         self.detected = {l for tl_id in net.tl_ids for l in net.in_lanes[tl_id]}
-        self.e2_cap = {l: max(1.0, min(self.e2_length, net.lane_length[l]) / VEH_SPACE)
-                       for l in self.detected}
+        self.e2_cap = {l: e2_capacity(net, l, self.e2_length) for l in self.detected}
 
     def upstream_counts(self, sim, tl_id):
         return [0] * len(self.served[tl_id])      # detectors only cover the controlled lanes
