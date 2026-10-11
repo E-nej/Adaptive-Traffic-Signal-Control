@@ -16,10 +16,14 @@ def network_for(cfg):
     return Network(cfg.network, os.path.join(cfg.output_dir, 'networks'))
 
 
+# control modes that run on a coordinated plan (SignalHead ready every second)
+PLAN_CONTROLS = ('plan', 'select')
+
+
 def sim_kwargs(cfg):
     """Simulation options for Python-controlled junctions."""
     # plan control switches on the plan's second; the policy still decides every interval
-    interval = 1 if cfg.signals.control == 'plan' else cfg.signals.decision_interval
+    interval = 1 if cfg.signals.control in PLAN_CONTROLS else cfg.signals.decision_interval
     return dict(decision_interval=interval, max_green=cfg.signals.max_green,
                 max_red=cfg.signals.max_red, e2_length=cfg.observation.e2_length)
 

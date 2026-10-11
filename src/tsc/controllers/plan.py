@@ -33,6 +33,7 @@ class PlanActions:
 
     n_actions = N_ACTIONS
     extra_dim = 6           # plan features appended to the observation
+    needs_plan = True
 
     def __init__(self, network, interval=5, max_extension=20):
         self.network = network
@@ -55,6 +56,17 @@ class PlanActions:
                 if sim.heads[tl_id].stage in plan.stages else 0
             self.count[tl_id] = n - back
         self.last = {tl_id: FOLLOW for tl_id in self.plans}
+
+    def rejoin(self, sim, tl_id):
+        """Take over a junction another controller has been running: continue in the plan's
+        current window, switching to its stage at once if the head shows another one."""
+        plan = self.plans[tl_id]
+        n = plan.counter(sim.t)
+        self.count[tl_id] = n if sim.heads[tl_id].stage == plan.stage(n) else n - 1
+        self.last[tl_id] = FOLLOW
+
+    def tick(self, sim):
+        pass
 
     # ------------------------------------------------------------------
 

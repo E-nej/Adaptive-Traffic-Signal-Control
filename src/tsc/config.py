@@ -53,7 +53,9 @@ class SignalConfig:
     decision_interval: int = 5        # s between decisions after min green
     control: str = 'stages'           # 'stages' (pick the next stage) | 'plan' (adjust a
                                       # coordinated plan: FOLLOW / HOLD / EARLY, step 2F)
+                                      # | 'select' (pick the junction's controller, step 2G)
     max_extension: int = 20           # s, plan control: longest green extension past the plan
+    select_interval: int = 90         # s, 'select' control: time between controller choices
     max_green: int | None = None      # s, safety shield (None = off)
     max_red: int | None = None        # s, safety shield (None = off)
 
@@ -122,6 +124,7 @@ class EvaluateConfig:
     # instead of each level's own (None): a stale plan
     plan_level: float | None = None
     plan_direction: str = 'match'     # 'match' | 'opposite' (e.g. the AM plan in the PM peak)
+    assignment: str = ''              # assignment.json of `tsc assign` (baseline select_assigned)
 
 
 @dataclass

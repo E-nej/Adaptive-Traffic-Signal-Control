@@ -1,0 +1,32 @@
+# Step 2G baseline: best fixed controller per junction and demand level (greedy search on
+# the calibration scenarios), then its evaluation with the other baselines:
+#   tsc assign configs/select/corridor_assign.toml
+#   tsc evaluate configs/select/corridor_assign.toml
+name = "select_corridor_assign"
+workers = 6
+
+[network]
+path = "networks/corridor/corridor.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.6
+tidal_share = 0.7
+tidal_random = true
+
+[signals]
+decision_interval = 5
+max_extension = 20
+max_red = 150
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[evaluate]
+baselines = ["greenwave_py", "plan_actuated", "select_assigned"]
+levels = [1000, 2000, 3000, 4000, 5000]
+n_seeds = 10
+n_calibration = 2
+assignment = "outputs/assign/select_corridor_assign/assignment.json"

@@ -105,3 +105,38 @@ def test_low_demand_plan_has_no_negative_green(corridor, work_root):
     phases = list(ET.parse(plan).getroot().iter('phase'))
     assert min(float(p.get('duration')) for p in phases) > 0
     assert required_cycle(corridor) == 43
+
+
+def test_fixed_selection_matches_experts(corridor, work_root):
+    """Selecting the green wave everywhere is the plan replay itself; switching experts
+    mid-run is safe (the plan expert rejoins the plan)."""
+    from tsc.config import DemandConfig
+    from tsc.controllers.select import FixedSelection
+    from tsc.controllers.webster import green_wave_programs
+    from tsc.demand import generate_routes
+    from tsc.plans import load_plans
+    from tsc.simulation import run_episode
+    demand = DemandConfig(generator='od', major_share=0.6, tidal_share=0.7, tidal_random=False,
+                          duration=900)
+    route = generate_routes(corridor, demand, os.path.join(work_root, 'sel.rou.xml'), 5, 3000)
+    plans = load_plans(green_wave_programs(corridor, [route], os.path.join(work_root, 'sel.add.xml')),
+                       corridor)
+    ref = PlanController(corridor)
+    ref.set_plans(plans)
+    a = run_episode(corridor, ref, route, 900, os.path.join(work_root, 'sel_ref'), seed=5,
+                    decision_interval=1)
+    sel = FixedSelection(corridor, default=0)
+    sel.set_plans(plans)
+    b = run_episode(corridor, sel, route, 900, os.path.join(work_root, 'sel_gw'), seed=5,
+                    decision_interval=1)
+    assert a['delay'] == pytest.approx(b['delay'])
+
+    class Rotating(FixedSelection):      # changes every junction's expert every 120 s
+        def act(self, sim, tl_id):
+            return self.actions.stage(sim, tl_id, (sim.t // 120) % 3)
+
+    rot = Rotating(corridor)
+    rot.set_plans(plans)
+    m = run_episode(corridor, rot, route, 900, os.path.join(work_root, 'sel_rot'), seed=5,
+                    decision_interval=1, max_red=150)
+    assert m['throughput'] > 0.7 and m['teleports'] == 0

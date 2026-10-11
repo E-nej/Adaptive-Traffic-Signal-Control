@@ -24,7 +24,8 @@ from tsc import plans as plans_mod
 from tsc.controllers import BASELINES, PLAN_BASELINES, baseline
 from tsc.controllers.webster import green_wave_programs, webster_programs
 from tsc.demand import generate_routes, is_directional, scenario_flip
-from tsc.experiments.common import network_for, run_parallel, save_run_info, sim_kwargs
+from tsc.experiments.common import (PLAN_CONTROLS, network_for, run_parallel, save_run_info,
+                                    sim_kwargs)
 from tsc.experiments.runs import is_run_dir, load_policy, load_run_config
 from tsc.simulation import run_episode
 
@@ -122,7 +123,15 @@ def run_task(task):
     network = network_for(cfg)
     kwargs = sim_kwargs(cfg)
     if run_dir is None:
-        if name in PLAN_BASELINES:
+        if name == 'select_assigned':
+            import json
+            from tsc.experiments.assign import make_fixed
+            with open(ec.assignment) as f:
+                table = {float(k): v for k, v in json.load(f).items()}
+            near = min(table, key=lambda x: abs(x - level))
+            tls, controller = 'python', make_fixed(network, cfg, table[near])
+            kwargs = sim_kwargs(config_mod.replace(cfg, signals={'control': 'select'}))
+        elif name in PLAN_BASELINES:
             plan_cfg = config_mod.replace(cfg, signals={'control': 'plan'})
             kwargs = sim_kwargs(plan_cfg)
             kwargs.update(max_green=None, max_red=None)   # the plan serves every stage
@@ -133,7 +142,7 @@ def run_task(task):
     else:
         tls = 'python'
         controller, run_cfg = load_policy(run_dir, network, which=ec.which)
-        if run_cfg.signals.control == 'plan':
+        if run_cfg.signals.control in PLAN_CONTROLS:
             kwargs = sim_kwargs(run_cfg)        # plan timing and the run's own shield
         elif cfg.signals.max_green is None and cfg.signals.max_red is None:
             # no shield set for the evaluation: use the one the run was trained with
@@ -179,7 +188,7 @@ def evaluate(cfg, out_dir=None, workers=None):
     run_dirs = find_runs(ec.runs)
     if ec.runs and not run_dirs:
         raise FileNotFoundError(f'No run directories match {ec.runs}')
-    plan_runs = any(load_run_config(d).signals.control == 'plan' for d in run_dirs)
+    plan_runs = any(load_run_config(d).signals.control in PLAN_CONTROLS for d in run_dirs)
     plan_names = ('greenwave',) if plan_runs or set(PLAN_BASELINES) & set(ec.baselines) else ()
     plans = prepare(network, cfg, work, plan_names)
 

@@ -21,7 +21,8 @@ import numpy as np
 from tsc import config as config_mod
 from tsc import seeds as seeds_mod
 from tsc.demand import generate_routes, is_directional, scenario_flip
-from tsc.experiments.common import network_for, run_parallel, save_run_info, sim_kwargs
+from tsc.experiments.common import (PLAN_CONTROLS, network_for, run_parallel, save_run_info,
+                                    sim_kwargs)
 from tsc.experiments.runs import make_controller, make_observer
 from tsc.reward import Reward
 from tsc.simulation import Simulation, run_episode
@@ -38,7 +39,7 @@ def train(cfg, seeds=None, out_root=None, workers=None):
         seeds_mod.check_train_seed(s)
     out_root = out_root or default_out(cfg)
     network = network_for(cfg)  # build the network once before the workers start
-    if cfg.signals.control == 'plan':
+    if cfg.signals.control in PLAN_CONTROLS:
         from tsc.experiments.evaluate import plan_library
         plan_library(network, cfg)      # and the plans
     tasks = [(config_mod.replace(cfg, train={'seeds': [s]}), os.path.join(out_root, f's{s}'))
@@ -113,7 +114,7 @@ def train_one(cfg, out_dir):
     greedy = make_controller(network, observer, cfg)
     agents, actions = greedy.agents, greedy.actions
     rng = np.random.default_rng(seed)
-    library = load_library(network, cfg) if cfg.signals.control == 'plan' else None
+    library = load_library(network, cfg) if cfg.signals.control in PLAN_CONTROLS else None
     plan_rng = np.random.default_rng(seed + 31337)      # separate stream: plan choice
     scale = cfg.reward.scale
 
@@ -169,6 +170,7 @@ def train_one(cfg, out_dir):
                 sim.heads[tl_id].request(actions.stage(sim, tl_id, greedy.last[tl_id]))
             sim.step()
             observer.tick(sim)
+            actions.tick(sim)
             for tl_id, r in reward_fn.all(sim).items():
                 acc[tl_id][0] += r
                 acc[tl_id][1] += 1
