@@ -176,8 +176,18 @@ communication only "works" if wrong-neighbour messages hurt.
       links toward i that are green, how long n has served i, and the queue on n's approach
       coming from i (spillback). `Network.toward` / `arrival` map the movements.
       Config: `configs/corridor/dir.toml`.
-- [ ] 2E.3 Cooperative reward: r_i + α·Σ r_neighbours (spatial discount, Chu et al. 2019) or a
-      pressure reward that includes downstream queues.
+- [x] 2E.3 Cooperative reward `[reward] neighbour_weight = α`: r_i + α·Σ r_neighbours
+      (spatial discount, Chu et al. 2019). α = 0 reproduces the previous training exactly.
+- [ ] 2E.5 Corridor experiment, 5 seeds each, evaluated vs green wave / detector max-pressure
+      and checked with `tsc diagnose messages`:
+
+      | config            | messages     | α   |
+      |-------------------|--------------|-----|
+      | corridor_full_nocomm | none      | 0   |
+      | corridor_full     | aggregate    | 0   |
+      | corridor_dir      | directional  | 0   |
+      | corridor_coop_nocomm | none      | 0.5 |
+      | corridor_dir_coop | directional  | 0.5 |
 - [ ] 2E.4 Only if 2E.1–2E.3 show neighbour-specific use: parameter sharing + learned attention
       over neighbours (CoLight-style), CTDE / value decomposition (CVDMARL).
 - Later: a small grid (e.g. 3×4) with a road hierarchy as a second scenario.

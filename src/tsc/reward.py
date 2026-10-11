@@ -20,17 +20,31 @@ class Reward:
     e.g. the road before a left-turn bay).
     """
 
-    def __init__(self, network, kind):
+    def __init__(self, network, kind, neighbour_weight=0.0):
         if kind not in KINDS:
             raise ValueError(f'Unknown reward {kind!r}; choose from {KINDS}')
         self.network = network
         self.kind = kind
+        self.neighbour_weight = neighbour_weight
         self.prev_wait = {tl_id: 0.0 for tl_id in network.tl_ids}
 
     def reset(self):
         self.prev_wait = {tl_id: 0.0 for tl_id in self.network.tl_ids}
 
+    def all(self, sim):
+        """Per-second reward of every junction: r_i + α·Σ_{n ∈ neighbours(i)} r_n.
+
+        With α > 0 (spatial discount, Chu et al. 2019) an agent is also rewarded for its
+        neighbours' traffic, e.g. for not sending traffic into a queue that spills back.
+        """
+        raw = {tl_id: self(sim, tl_id) for tl_id in self.network.tl_ids}
+        if not self.neighbour_weight:
+            return raw
+        return {tl_id: r + self.neighbour_weight * sum(raw[n] for n in self.network.neighbours[tl_id])
+                for tl_id, r in raw.items()}
+
     def __call__(self, sim, tl_id):
+        """Own (local) per-second reward of one junction."""
         api = sim.api
         lanes = self.network.in_lanes[tl_id]
         if self.kind == 'det_queue':

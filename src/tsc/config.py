@@ -68,6 +68,7 @@ class ObservationConfig:
 @dataclass
 class RewardConfig:
     kind: str = 'multi'               # 'wait' | 'multi' | 'queue' | 'det_queue'
+    neighbour_weight: float = 0.0     # α: r_i + α·Σ r_neighbours (cooperative reward)
 
 
 @dataclass

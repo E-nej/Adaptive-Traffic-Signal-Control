@@ -123,3 +123,17 @@ def test_message_modes(test5):
     assert not np.allclose(wrong.ravel(), real)
     with pytest.raises(ValueError):
         obs.set_message_mode('bogus')
+
+
+def test_cooperative_reward(test5):
+    """α = 0 gives the local rewards; α > 0 adds α × the neighbours' rewards."""
+    sim = fake_sim(test5, halting=1)
+    halting = {tl: i + 1 for i, tl in enumerate(test5.tl_ids)}
+    sim.api.lane.getLastStepHaltingNumber = lambda l: next(
+        h for tl, h in halting.items() if l in test5.in_lanes[tl])
+    local = Reward(test5, 'queue').all(sim)
+    assert local == {tl: Reward(test5, 'queue')(sim, tl) for tl in test5.tl_ids}
+    coop = Reward(test5, 'queue', neighbour_weight=0.5).all(sim)
+    for tl in test5.tl_ids:
+        expected = local[tl] + 0.5 * sum(local[n] for n in test5.neighbours[tl])
+        assert abs(coop[tl] - expected) < 1e-12

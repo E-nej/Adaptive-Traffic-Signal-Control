@@ -82,7 +82,7 @@ def train_one(cfg, out_dir):
 
     network = network_for(cfg)
     observer = make_observer(network, cfg, seed)
-    reward_fn = Reward(network, cfg.reward.kind)
+    reward_fn = Reward(network, cfg.reward.kind, cfg.reward.neighbour_weight)
     agents = make_agents(network, observer, cfg.agent)
     greedy = RLController(agents, observer)
     rng = np.random.default_rng(seed)
@@ -128,8 +128,8 @@ def train_one(cfg, out_dir):
                 acc[tl_id] = [0.0, 0]
             sim.step()
             observer.tick(sim)
-            for tl_id in network.tl_ids:
-                acc[tl_id][0] += reward_fn(sim, tl_id)
+            for tl_id, r in reward_fn.all(sim).items():
+                acc[tl_id][0] += r
                 acc[tl_id][1] += 1
 
         m = sim.close()

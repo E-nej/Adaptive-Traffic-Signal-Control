@@ -15,6 +15,8 @@ tidal_random = true
 
 [evaluate]
 baselines = []
-runs = ["outputs/train/corridor_full/s*", "outputs/train/corridor_full_nocomm/s*"]
+runs = ["outputs/train/corridor_full/s*", "outputs/train/corridor_full_nocomm/s*",
+        "outputs/train/corridor_dir/s*", "outputs/train/corridor_dir_coop/s*",
+        "outputs/train/corridor_coop_nocomm/s*"]
 levels = [1000, 2000, 3000, 4000, 5000]
 n_seeds = 10
