@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `maxpressure_det` baseline: max-pressure on the E2 detectors only, with the experiment's
+  detector noise / dropout (`configs/step2/baselines.toml`, with the safety shield).
+- `tsc compare`: paired comparison against a reference controller (relative difference per
+  scenario, 95 % CI, Wilcoxon signed-rank test).
+- `tsc diagnose messages`: evaluates communicating policies with real, zeroed and
+  wrong-neighbour messages (`Observer.set_message_mode`).
+
 ## [0.2.0] - Unreleased
 
 The codebase is now a single Python package (`tsc`) and the experiments are made

@@ -98,14 +98,13 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 ### 1F. RL training at realistic demand
 - [x] 1F.1 Train with **randomised demand** (level sampled per episode) so one model
       covers the whole sweep.
-- [~] 1F.2 Configs `base` / `full` / `full_nocomm` / `queue`, 5 training seeds each, 150 episodes
-      (running).
-- [ ] 1F.3 Evaluate on ≥ 10 held-out scenario seeds per demand level, ε = 0.
+- [x] 1F.2 Configs `base` / `full` / `full_nocomm` / `queue`, 5 training seeds each, 150 episodes.
+- [x] 1F.3 Evaluate on ≥ 10 held-out scenario seeds per demand level, ε = 0.
 
 ### 1G. Report
-- [ ] 1G.1 Plot: delay per vehicle vs. demand level, one line per controller, 95 % CI.
-- [ ] 1G.2 Table: travel time, delay, stops, throughput, CO2 at each level.
-- [ ] 1G.3 Short write-up: does RL beat actuated / max-pressure? Does comm help near saturation?
+- [x] 1G.1 Plot: delay per vehicle vs. demand level, one line per controller, 95 % CI.
+- [x] 1G.2 Table: travel time, delay, stops, throughput, CO2 at each level.
+- [x] 1G.3 Short write-up: does RL beat actuated / max-pressure? Does comm help near saturation?
 
 ## Step 2 — Realistic sensing & safety constraints
 
@@ -128,9 +127,39 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - [x] 2B.3 Count shield overrides as a metric (a good policy rarely needs them).
 
 ### 2C. Re-run
-- [~] 2C.1 Retrain `full` / `full_nocomm` / `det_queue` with detector state (noise 0.05,
-      dropout 0.02) + shield, 5 seeds (running).
-- [ ] 2C.2 Evaluate with the same harness; compare to step 1 ("cost of realism").
+- [x] 2C.1 Retrain `full` / `full_nocomm` / `det_queue` with detector state (noise 0.05,
+      dropout 0.02) + shield, 5 seeds.
+- [x] 2C.2 Evaluate with the same harness; compare to step 1 ("cost of realism").
+
+### 2D. Follow-ups found during evaluation
+- [x] 2D.1 Max-pressure in step 2 read whole-lane vehicle counts (ground truth). Added
+      `maxpressure_det` (E2 counts on incoming lanes, downstream E2 where it exists, with the
+      experiment's detector noise/dropout): `tsc evaluate configs/step2/baselines.toml`.
+- [x] 2D.2 Shielded max-pressure (60 s / 90 s) is part of the same config. The shield alone
+      improves max-pressure by 3–19 %.
+- [x] 2D.3 Paired comparison + Wilcoxon test: `tsc compare <csv...> --ref <controller>`.
+
+## Step 2E — Make communication useful
+Diagnostic (`tsc diagnose messages`, test-time only): replacing the real neighbour messages with
+messages from *random other junctions* changes delay by < 1.2 % (n.s.), while zeroing them adds
++14–69 %. **The agents use messages only as a network-load signal, not as neighbour-specific
+information.** With uniform random O/D, short links and randomised demand per episode, any
+junction's message tells the same thing (how busy the network is). Standard check from now on:
+communication only "works" if wrong-neighbour messages hurt.
+
+- [ ] 2E.1 Scenario where neighbours carry information a junction can't see itself: an arterial
+      corridor (6–8 signals, irregular 200–400 m spacing, 2+2 lanes with left-turn bays,
+      secondary cross streets, unsignalised priority junctions for residential streets, open
+      boundaries), O/D flows with dominant through traffic and a tidal direction. New baseline:
+      coordinated fixed-time green wave (SUMO `tlsCoordinator.py`).
+- [ ] 2E.2 Directional, lane-aligned messages: per incoming link, vehicles the upstream
+      neighbour released toward me (its stop-line loop counts) + whether it currently serves
+      me and for how long; per outgoing link, the downstream queue (spillback).
+- [ ] 2E.3 Cooperative reward: r_i + α·Σ r_neighbours (spatial discount, Chu et al. 2019) or a
+      pressure reward that includes downstream queues.
+- [ ] 2E.4 Only if 2E.1–2E.3 show neighbour-specific use: parameter sharing + learned attention
+      over neighbours (CoLight-style), CTDE / value decomposition (CVDMARL).
+- Later: a small grid (e.g. 3×4) with a road hierarchy as a second scenario.
 
 ## Later (not now)
 - Step 3: real Maribor corridor (OSM → netconvert, manual fixes, counts → routeSampler).
@@ -154,6 +183,13 @@ uv run tsc plot outputs/eval/baselines/results.csv outputs/eval/step1/results.cs
 Runs trained with the pre-package scripts (`Deep-Qlearning-TSC/runs/train*/…`) can be
 evaluated with `--runs "<dir>/*"`; they are loaded from their `config.json`.
 
+```bash
+uv run tsc evaluate configs/step2/baselines.toml                 # shielded + detector max-pressure
+uv run tsc compare outputs/eval/step2_baselines/results.csv outputs/eval/step2/results.csv \
+       --ref maxpressure_det_shield                              # paired, Wilcoxon
+uv run tsc diagnose messages configs/step2/evaluate.toml         # do agents use the messages?
+```
+
 ## Log
 - 2026-10-11: plan written, branch `realism` created from `origin/multiagent`.
 - 2026-10-11: steps 0, 1A–1E, 2A–2B implemented. Baseline sweep done (10 seeds per level).
@@ -163,3 +199,17 @@ evaluated with `--runs "<dir>/*"`; they are loaded from their `config.json`.
 - 2026-10-11: refactor into the `tsc` package (v0.2.0, branch `refactor-v0.2`,
   see [REFACTOR.md](REFACTOR.md)). Baseline sweep, observations/rewards, trained-policy
   evaluation and short training runs reproduce the pre-package scripts exactly.
+- 2026-10-11: all 35 runs trained and evaluated (6 levels × 10 held-out seeds).
+  Step 1: every RL config is far better than the fixed timer and roughly equal to max-pressure;
+  the `queue` reward is the best (−6 to −18 % delay vs max-pressure at 600–1200 veh/h,
+  significant; within noise near saturation). Communication brings no measurable benefit
+  (`full_nocomm` ≥ `full` everywhere). All 5 seeds of every config converge to similar
+  policies (no failed seeds, unlike the paper's ablation; plausibly the F10 fix).
+- 2026-10-11: 2D done. On the same noisy detectors + shield, step-2 RL ≈ max-pressure:
+  `full_nocomm` is 2–3 % better at 600–1800 veh/h (significant only at 1200), tied near
+  saturation; `full` (with communication) is tied or slightly worse; `det_queue` is 9 % worse
+  at 3600. Limiting max-pressure to 50 m detectors costs it up to 14 % (at 2400) vs ground truth.
+  Oddity: noisy detector max-pressure beats noise-free detector max-pressure at 3000–3600
+  (noise breaks its tendency to hold a stage) — worth a look before publishing.
+- 2026-10-11: message diagnostic → communication is used only as a load signal (2E).
+  Graphite stack on top of `refactor-v0.2`: `2d-detector-maxpressure`, then the corridor (2E.1).

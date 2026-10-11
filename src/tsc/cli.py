@@ -1,9 +1,11 @@
-"""Command line: tsc train | evaluate | plot.
+"""Command line: tsc train | evaluate | plot | compare | diagnose.
 
     tsc train configs/step1/full.toml --seeds 0-4 --workers 5
     tsc evaluate configs/baselines.toml
     tsc evaluate configs/step1/evaluate.toml --runs "outputs/train/full/s*"
     tsc plot outputs/eval/baselines/results.csv outputs/eval/step1/results.csv --out outputs/plots
+    tsc compare outputs/eval/baselines/results.csv outputs/eval/step1/results.csv --ref maxpressure
+    tsc diagnose messages configs/step2/evaluate.toml --runs "outputs/train/step2_full/s*"
 
 Any config value can be overridden with --set section.key=value (TOML syntax),
 e.g. --set observation.noise=0.1 --set name=full_noise
@@ -54,6 +56,26 @@ def cmd_plot(args):
     plot(args.csv, args.out)
 
 
+def cmd_compare(args):
+    import pandas as pd
+    from tsc.experiments.stats import paired_table
+    df = pd.concat([pd.read_csv(f) for f in args.csv], ignore_index=True)
+    table = paired_table(df, args.ref, metric=args.metric)
+    print(f'{args.metric} relative to {args.ref} (paired over scenarios, * = Wilcoxon p < 0.05)')
+    print(table.to_string())
+    if args.out:
+        with open(args.out, 'w', encoding='utf-8') as f:
+            f.write(table.to_markdown())
+
+
+def cmd_diagnose(args):
+    from tsc.experiments import diagnose
+    cfg = _load(args)
+    if args.runs is not None:
+        cfg = config_mod.replace(cfg, evaluate={'runs': args.runs})
+    getattr(diagnose, args.what)(cfg, out_dir=args.out)
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog='tsc', description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -81,6 +103,19 @@ def build_parser():
     pl.add_argument('csv', nargs='+')
     pl.add_argument('--out', default='outputs/plots')
     pl.set_defaults(func=cmd_plot)
+
+    c = sub.add_parser('compare', help='paired comparison against a reference controller')
+    c.add_argument('csv', nargs='+')
+    c.add_argument('--ref', required=True, help="reference controller, e.g. 'maxpressure'")
+    c.add_argument('--metric', default='delay')
+    c.add_argument('--out', help='also write the table as Markdown')
+    c.set_defaults(func=cmd_compare)
+
+    d = sub.add_parser('diagnose', help='diagnostics of trained policies')
+    d.add_argument('what', choices=['messages'], help='messages: real vs zero vs wrong-neighbour')
+    with_config(d)
+    d.add_argument('--runs', nargs='*', help='trained run directories (globs ok)')
+    d.set_defaults(func=cmd_diagnose)
     return p
 
 

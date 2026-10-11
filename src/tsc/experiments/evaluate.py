@@ -68,7 +68,7 @@ def run_task(task):
     kwargs = sim_kwargs(cfg)
     additional = None
     if run_dir is None:
-        tls, controller = baseline(name)
+        tls, controller = baseline(name, cfg)
         meta = {'controller': name, 'config': name, 'train_seed': ''}
         if name == 'webster':
             additional = [webster_file]
@@ -86,6 +86,8 @@ def run_task(task):
     rows = []
     for i in range(ec.n_seeds):
         seed = seeds_mod.evaluation(i)
+        if hasattr(controller, 'reseed'):
+            controller.reseed(seed)
         out_dir = os.path.join(work, 'tmp', f"{meta['controller']}{ec.tag}_L{int(level)}_s{seed}")
         m = run_episode(network, controller, route_path(work, level, seed), cfg.demand.duration,
                         out_dir, seed=seed, tls=tls, additional=additional, **kwargs)

@@ -81,7 +81,7 @@ def plot(csv_files, out):
     table['value'] = table.apply(lambda r: f"{r['mean']:.2f} ± {r['ci']:.2f}", axis=1)
     wide = table.pivot_table(index=['metric', 'group'], columns='level', values='value', aggfunc='first')
     wide.to_csv(os.path.join(out, 'summary.csv'))
-    with open(os.path.join(out, 'summary.md'), 'w') as f:
+    with open(os.path.join(out, 'summary.md'), 'w', encoding='utf-8') as f:
         f.write(wide.to_markdown())
     print(wide.loc['delay'].to_string())
     return wide

@@ -102,3 +102,24 @@ def test_rewards_are_per_lane(test5, kind):
 def test_unknown_reward():
     with pytest.raises(ValueError):
         Reward(SimpleNamespace(tl_ids=[]), 'nope')
+
+
+def test_message_modes(test5):
+    """'zero' blanks every neighbour slot; 'wrong' fills them with other junctions' messages."""
+    obs = Observer(test5, mode='grid', comm=True)
+    queues = {tl: i + 1 for i, tl in enumerate(test5.tl_ids)}   # distinct halting per junction
+    sim = fake_sim(test5)
+    sim.api.lane.getLastStepHaltingNumber = lambda l: next(
+        q for tl, q in queues.items() if l in test5.in_lanes[tl])
+    tl = 'J0'
+    real = obs.observe(sim, tl)[obs.local_dim:]
+    obs.set_message_mode('zero')
+    assert not obs.observe(sim, tl)[obs.local_dim:].any()
+    obs.set_message_mode('wrong', seed=0)
+    wrong = obs.observe(sim, tl)[obs.local_dim:].reshape(-1, MSG_SIZE)
+    n = len(test5.neighbours[tl])
+    own = obs.message(sim, tl)
+    assert not any(np.allclose(m, own) for m in wrong[:n])   # never the junction's own message
+    assert not np.allclose(wrong.ravel(), real)
+    with pytest.raises(ValueError):
+        obs.set_message_mode('bogus')

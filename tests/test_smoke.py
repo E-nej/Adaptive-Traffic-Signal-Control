@@ -30,7 +30,7 @@ def check(m):
     assert m['delay'] >= 0 and 0 <= m['throughput'] <= 1
 
 
-@pytest.mark.parametrize('name', ['fixed', 'actuated', 'maxpressure'])
+@pytest.mark.parametrize('name', ['fixed', 'actuated', 'maxpressure', 'maxpressure_det'])
 @pytest.mark.parametrize('net_name', ['test5', 'single_4l'])
 def test_baseline(request, routes, work_root, net_name, name):
     network = request.getfixturevalue(net_name)
@@ -67,3 +67,15 @@ def test_rl_policy(test5, routes, work_root, mode):
     controller = RLController(make_agents(test5, observer, cfg.agent), observer, epsilon=0.1)
     out = os.path.join(work_root, 'smoke', f'rl_{mode}')
     check(run_episode(test5, controller, routes['test5'], DURATION, out, seed=1))
+
+
+def test_detector_maxpressure_noise(test5, routes, work_root):
+    """Noisy detector max-pressure runs and is reproducible for the same seed."""
+    from tsc.controllers import DetectorMaxPressure
+    results = []
+    for i in range(2):
+        controller = DetectorMaxPressure(noise=0.05, dropout=0.02, seed=7)
+        out = os.path.join(work_root, 'smoke', f'mp_det_noisy_{i}')
+        results.append(run_episode(test5, controller, routes['test5'], DURATION, out, seed=1))
+    check(results[0])
+    assert results[0]['delay'] == results[1]['delay']

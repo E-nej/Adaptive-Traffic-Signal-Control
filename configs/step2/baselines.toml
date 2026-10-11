@@ -1,0 +1,21 @@
+# Step 2 baselines on equal terms with the step-2 RL runs: the same max-green / max-red
+# shield, and max-pressure on the same noisy E2 detectors as the RL agents (2D.1, 2D.2).
+#   tsc evaluate configs/step2/baselines.toml
+# Noise-free detector max-pressure:
+#   tsc evaluate configs/step2/baselines.toml --set observation.noise=0.0 \
+#       --set observation.dropout=0.0 --set "evaluate.tag=\"_shield_clean\"" --set "name=\"step2_baselines_clean\""
+name = "step2_baselines"
+workers = 12
+
+[signals]
+max_green = 60
+max_red = 90
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[evaluate]
+baselines = ["maxpressure", "maxpressure_det"]
+tag = "_shield"

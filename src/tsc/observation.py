@@ -31,7 +31,14 @@ class Observer:
     Layout: per incoming lane (grid: N_CELLS occupancy cells + halting ratio;
     detector: DET_FEATS), one-hot green stage, time in green, then — with
     comm — MSG_SIZE values per neighbour.
+
+    message_mode is a test-time diagnostic (`tsc diagnose messages`):
+    'real' (default), 'zero' (all messages 0), or 'wrong' (each neighbour slot
+    gets the message of a random *other* junction).  If 'wrong' performs as
+    well as 'real', the policy does not use neighbour-specific information.
     """
+
+    MESSAGE_MODES = ('real', 'zero', 'wrong')
 
     def __init__(self, network, mode='grid', comm=True, noise=0.0, dropout=0.0, seed=0,
                  e2_length=50.0):
@@ -50,6 +57,13 @@ class Observer:
         self.local_dim = network.max_in_lanes * per_lane + network.max_greens + 1
         self.dim = self.local_dim + (network.max_neighbours * MSG_SIZE if comm else 0)
         self.passed = {l: 0 for tl_id in network.tl_ids for l in network.in_lanes[tl_id]}
+        self.set_message_mode('real')
+
+    def set_message_mode(self, mode, seed=0):
+        if mode not in self.MESSAGE_MODES:
+            raise ValueError(f'Unknown message mode {mode!r}; choose from {self.MESSAGE_MODES}')
+        self.message_mode = mode
+        self.message_rng = np.random.default_rng(seed)
 
     def reset(self, sim=None):
         self.passed = {l: 0 for l in self.passed}
@@ -128,7 +142,14 @@ class Observer:
     def observe(self, sim, tl_id):
         parts = [self.local(sim, tl_id)]
         if self.comm:
-            msgs = [self.message(sim, n) for n in self.network.neighbours[tl_id]]
+            neighbours = self.network.neighbours[tl_id]
+            if self.message_mode == 'zero':
+                msgs = [[0.0] * MSG_SIZE] * len(neighbours)
+            elif self.message_mode == 'wrong':
+                others = [t for t in self.network.tl_ids if t != tl_id]
+                msgs = [self.message(sim, self.message_rng.choice(others)) for _ in neighbours]
+            else:
+                msgs = [self.message(sim, n) for n in neighbours]
             msgs += [[0.0] * MSG_SIZE] * (self.network.max_neighbours - len(msgs))
             parts.append(np.ravel(msgs))
         return np.concatenate(parts).astype(np.float32)
