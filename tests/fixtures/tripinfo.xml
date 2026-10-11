@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- small hand-written tripinfo file: two arrived vehicles, one still driving at the end -->
+<tripinfos>
+    <tripinfo id="a" depart="0.00" departDelay="1.00" arrival="50.00" duration="50.00" timeLoss="10.00" waitingTime="4.00" waitingCount="1">
+        <emissions CO2_abs="100000.00"/>
+    </tripinfo>
+    <tripinfo id="b" depart="5.00" departDelay="0.00" arrival="45.00" duration="40.00" timeLoss="20.00" waitingTime="8.00" waitingCount="2">
+        <emissions CO2_abs="200000.00"/>
+    </tripinfo>
+    <tripinfo id="c" depart="30.00" departDelay="3.00" arrival="-1.00" duration="30.00" timeLoss="6.00" waitingTime="0.00" waitingCount="0">
+        <emissions CO2_abs="60000.00"/>
+    </tripinfo>
+</tripinfos>

@@ -35,4 +35,8 @@ packages = ["src/tsc"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["sumo: runs a short SUMO simulation (a few seconds each)"]
+markers = ["sumo: runs short SUMO simulations (deselect with -m 'not sumo')"]
+filterwarnings = [
+    # Keras passes copy=False to np.array on TensorFlow tensors (harmless, NumPy 2 notice)
+    "ignore:__array__ implementation doesn't accept a copy keyword:DeprecationWarning",
+]
