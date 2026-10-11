@@ -51,6 +51,9 @@ class DemandConfig:
 class SignalConfig:
     """Python-controlled junctions (max-pressure, RL)."""
     decision_interval: int = 5        # s between decisions after min green
+    control: str = 'stages'           # 'stages' (pick the next stage) | 'plan' (adjust a
+                                      # coordinated plan: FOLLOW / HOLD / EARLY, step 2F)
+    max_extension: int = 20           # s, plan control: longest green extension past the plan
     max_green: int | None = None      # s, safety shield (None = off)
     max_red: int | None = None        # s, safety shield (None = off)
 
@@ -69,6 +72,7 @@ class ObservationConfig:
 class RewardConfig:
     kind: str = 'multi'               # 'wait' | 'multi' | 'queue' | 'det_queue'
     neighbour_weight: float = 0.0     # α: r_i + α·Σ r_neighbours (cooperative reward)
+    scale: float = 1.0                # rewards are multiplied by this before learning
 
 
 @dataclass
@@ -83,6 +87,7 @@ class AgentConfig:
     buffer_size: int = 50000
     learn_start: int = 500
     hidden: list[int] = field(default_factory=lambda: [400, 400])
+    shared: bool = False              # one network for all junctions (+ junction one-hot)
 
 
 @dataclass
@@ -95,6 +100,11 @@ class TrainConfig:
     eps_fraction: float = 0.6         # fraction of episodes over which epsilon decays
     val_every: int = 10               # episodes between validations (model selection)
     val_levels: list[float] = field(default_factory=lambda: [1200.0, 2400.0])
+    # plan control: green-wave plans calibrated at these levels (per direction); an episode
+    # runs the plan matching its demand with probability plan_match, else a random one
+    plan_levels: list[float] = field(
+        default_factory=lambda: [1000.0, 2000.0, 3000.0, 4000.0, 5000.0])
+    plan_match: float = 0.5
 
 
 @dataclass
@@ -108,6 +118,10 @@ class EvaluateConfig:
     n_seeds: int = 10                 # evaluation scenarios per level
     n_calibration: int = 3            # scenarios per level for the Webster plan
     tag: str = ''                     # suffix for controller names (e.g. '_shield')
+    # fixed-time plans (and plan-controlled policies) use the plan of this demand level
+    # instead of each level's own (None): a stale plan
+    plan_level: float | None = None
+    plan_direction: str = 'match'     # 'match' | 'opposite' (e.g. the AM plan in the PM peak)
 
 
 @dataclass

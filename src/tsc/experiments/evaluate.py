@@ -18,12 +18,14 @@ import csv
 import glob
 import os
 
+from tsc import config as config_mod
 from tsc import seeds as seeds_mod
-from tsc.controllers import BASELINES, baseline
+from tsc import plans as plans_mod
+from tsc.controllers import BASELINES, PLAN_BASELINES, baseline
 from tsc.controllers.webster import green_wave_programs, webster_programs
 from tsc.demand import generate_routes, is_directional, scenario_flip
 from tsc.experiments.common import network_for, run_parallel, save_run_info, sim_kwargs
-from tsc.experiments.runs import is_run_dir, load_policy
+from tsc.experiments.runs import is_run_dir, load_policy, load_run_config
 from tsc.simulation import run_episode
 
 
@@ -40,21 +42,26 @@ def route_path(work, level, seed, direction=''):
     return os.path.join(work, 'routes', f'L{int(level)}_s{seed}{suffix}.rou.xml')
 
 
-def prepare(network, cfg, work):
+def prepare(network, cfg, work, plan_names=()):
     """Generate evaluation + calibration routes (once) and the fixed-time plans of every level.
 
     Returns {level: {direction: {baseline: plan file}}}; direction is None without tidal
-    demand, else False / True (see demand.scenario_flip).
+    demand, else False / True (see demand.scenario_flip).  Plans are built for the
+    fixed-time baselines and for `plan_names` (e.g. 'greenwave' for plan-controlled runs),
+    at every evaluation level and at evaluate.plan_level.
     """
     ec = cfg.evaluate
     os.makedirs(os.path.join(work, 'routes'), exist_ok=True)
     directions = [False, True] if is_directional(cfg.demand) else [None]
+    wanted = set(ec.baselines) | set(plan_names)
+    levels = list(ec.levels) + ([ec.plan_level] if ec.plan_level not in (None, *ec.levels) else [])
     plans = {}
-    for level in ec.levels:
-        for i in range(ec.n_seeds):
-            seed = seeds_mod.evaluation(i)
-            if not os.path.exists(route_path(work, level, seed)):
-                generate_routes(network, cfg.demand, route_path(work, level, seed), seed, level)
+    for level in levels:
+        if level in ec.levels:
+            for i in range(ec.n_seeds):
+                seed = seeds_mod.evaluation(i)
+                if not os.path.exists(route_path(work, level, seed)):
+                    generate_routes(network, cfg.demand, route_path(work, level, seed), seed, level)
         plans[level] = {}
         for flip in directions:
             tag = DIRECTIONS.get(flip, '')
@@ -68,9 +75,36 @@ def prepare(network, cfg, work):
             plans[level][flip] = {
                 name: build(network, calib, os.path.join(
                     work, 'routes', f'{name}_L{int(level)}{"_" + tag if tag else ""}.add.xml'))
-                for name, build in PLAN_BUILDERS.items() if name in ec.baselines
+                for name, build in PLAN_BUILDERS.items() if name in wanted
             }
     return plans
+
+
+def plan_for(cfg, plans, level, seed, name):
+    """Plan file that fixed-time plan `name` uses in evaluation scenario `seed` of `level`
+    (its own level and direction, unless evaluate.plan_level / plan_direction say otherwise)."""
+    ec = cfg.evaluate
+    if ec.plan_direction not in ('match', 'opposite'):
+        raise ValueError(f'Unknown plan_direction {ec.plan_direction!r}')
+    flip = scenario_flip(cfg.demand, seed) if is_directional(cfg.demand) else None
+    if flip is not None and ec.plan_direction == 'opposite':
+        flip = not flip
+    return plans[ec.plan_level if ec.plan_level is not None else level][flip][name]
+
+
+def plan_library(network, cfg, work=None):
+    """Green-wave plans at train.plan_levels x directions, from the calibration scenarios
+    (the same plans the evaluation computes).  Returns {(level, flip): plan file}."""
+    import hashlib
+    import json
+    key = hashlib.sha1(json.dumps(config_mod.to_dict(cfg)['demand'], sort_keys=True).encode())
+    work = work or os.path.join(cfg.output_dir, 'plans',
+                                f'{os.path.basename(network.work_dir)}-{key.hexdigest()[:8]}')
+    lib_cfg = config_mod.replace(cfg, evaluate={'levels': list(cfg.train.plan_levels),
+                                                'n_seeds': 0, 'baselines': [], 'plan_level': None})
+    plans = prepare(network, lib_cfg, work, plan_names=('greenwave',))
+    return {(level, flip): files['greenwave']
+            for level, by_dir in plans.items() for flip, files in by_dir.items()}
 
 
 def find_runs(patterns):
@@ -85,18 +119,30 @@ def run_task(task):
     network = network_for(cfg)
     kwargs = sim_kwargs(cfg)
     if run_dir is None:
-        tls, controller = baseline(name, cfg)
+        if name in PLAN_BASELINES:
+            plan_cfg = config_mod.replace(cfg, signals={'control': 'plan'})
+            kwargs = sim_kwargs(plan_cfg)
+            kwargs.update(max_green=None, max_red=None)   # the plan serves every stage
+            tls, controller = baseline(name, plan_cfg, network)
+        else:
+            tls, controller = baseline(name, cfg, network)
         meta = {'controller': name, 'config': name, 'train_seed': ''}
     else:
         tls = 'python'
         controller, run_cfg = load_policy(run_dir, network, which=ec.which)
-        if cfg.signals.max_green is None and cfg.signals.max_red is None:
+        if run_cfg.signals.control == 'plan':
+            kwargs = sim_kwargs(run_cfg)        # plan timing and the run's own shield
+        elif cfg.signals.max_green is None and cfg.signals.max_red is None:
             # no shield set for the evaluation: use the one the run was trained with
             kwargs.update(max_green=run_cfg.signals.max_green, max_red=run_cfg.signals.max_red)
         seed = run_cfg.train.seeds[0]
-        meta = {'controller': f'{run_cfg.name}_s{seed}', 'config': run_cfg.name, 'train_seed': seed}
+        tag = f'_{ec.which}' if ec.which != 'best' else ''
+        meta = {'controller': f'{run_cfg.name}{tag}_s{seed}', 'config': run_cfg.name + tag,
+                'train_seed': seed}
     if tls != 'python':
         kwargs = {}
+    needs_plan = getattr(controller, 'needs_plan', False)
+    loaded = {}
 
     rows = []
     for i in range(ec.n_seeds):
@@ -105,8 +151,12 @@ def run_task(task):
             controller.reseed(seed)
         additional = None
         if name in PLAN_BUILDERS:
-            flip = scenario_flip(cfg.demand, seed) if is_directional(cfg.demand) else None
-            additional = [plans[flip][name]]
+            additional = [plan_for(cfg, plans, level, seed, name)]
+        if needs_plan:
+            path = plan_for(cfg, plans, level, seed, 'greenwave')
+            if path not in loaded:
+                loaded[path] = plans_mod.load_plans(path, network)
+            controller.set_plans(loaded[path])
         out_dir = os.path.join(work, 'tmp', f"{meta['controller']}{ec.tag}_L{int(level)}_s{seed}")
         m = run_episode(network, controller, route_path(work, level, seed), cfg.demand.duration,
                         out_dir, seed=seed, tls=tls, additional=additional, **kwargs)
@@ -123,13 +173,15 @@ def evaluate(cfg, out_dir=None, workers=None):
     work = out_dir or default_out(cfg)
     save_run_info(cfg, work)
     network = network_for(cfg)
-    plans = prepare(network, cfg, work)
-
     run_dirs = find_runs(ec.runs)
     if ec.runs and not run_dirs:
         raise FileNotFoundError(f'No run directories match {ec.runs}')
+    plan_runs = any(load_run_config(d).signals.control == 'plan' for d in run_dirs)
+    plan_names = ('greenwave',) if plan_runs or set(PLAN_BASELINES) & set(ec.baselines) else ()
+    plans = prepare(network, cfg, work, plan_names)
+
     controllers = [(b, None) for b in ec.baselines] + [(None, d) for d in run_dirs]
-    tasks = [(cfg, name, d, level, work, plans[level])
+    tasks = [(cfg, name, d, level, work, plans)
              for name, d in controllers for level in ec.levels]
 
     rows = []

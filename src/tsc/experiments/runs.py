@@ -70,9 +70,15 @@ def make_observer(network, cfg, seed):
 
 def load_policy(run_dir, network, which='best'):
     """(greedy RLController, run Config) of a trained run, on `network`."""
-    from tsc.controllers.rl import RLController, make_agents
     cfg = load_run_config(run_dir)
     seed = cfg.train.seeds[0]
     observer = make_observer(network, cfg, seed + EVAL_NOISE_SEED_OFFSET)
-    agents = make_agents(network, observer, cfg.agent)
-    return RLController(agents, observer).load(run_dir, which), cfg
+    return make_controller(network, observer, cfg).load(run_dir, which), cfg
+
+
+def make_controller(network, observer, cfg, epsilon=0.0):
+    """RLController with fresh agents for a Config (action space, shared agent)."""
+    from tsc.controllers.rl import RLController, make_actions, make_agents
+    actions = make_actions(network, observer, cfg)
+    agents = make_agents(network, observer, cfg.agent, actions)
+    return RLController(agents, observer, epsilon, actions=actions, shared=cfg.agent.shared)

@@ -9,31 +9,48 @@ actuated        : SUMO's gap-based actuated control
 maxpressure     : max-pressure on whole-lane counts (perfect information), Python-controlled
 maxpressure_det : max-pressure on the E2 detectors only, with the noise / dropout of the
                   experiment's [observation] section (same sensors as RL in step 2)
+greenwave_py    : the green-wave plan replayed by Python (SignalHead), the reference for
+                  plan-controlled RL (same switching mechanics)
+plan_actuated   : coordinated-actuated control on the green-wave plan (gap-based extension,
+                  early end of empty greens; controllers.plan)
 
 RL policies (controllers.rl) are Python-controlled as well.
 """
 
 from tsc.controllers.base import Controller
 from tsc.controllers.maxpressure import DetectorMaxPressure, MaxPressure
+from tsc.controllers.plan import PlanActuated, PlanController
 
 
-def _detector_maxpressure(cfg):
+def _detector_maxpressure(cfg, network):
     o = cfg.observation
     return DetectorMaxPressure(noise=o.noise, dropout=o.dropout, e2_length=o.e2_length)
 
 
-# name -> (tls mode of the simulation, factory(cfg) of the Python controller, or None)
+def _plan(cls):
+    def factory(cfg, network):
+        s = cfg.signals
+        return cls(network, interval=s.decision_interval, max_extension=s.max_extension)
+    return factory
+
+
+# name -> (tls mode of the simulation, factory(cfg, network) of the Python controller, or None)
 BASELINES = {
     'fixed': ('fixed', None),
     'webster': ('webster', None),
     'greenwave': ('webster', None),      # also a fixed plan from an additional file
     'actuated': ('actuated', None),
-    'maxpressure': ('python', lambda cfg: MaxPressure()),
+    'maxpressure': ('python', lambda cfg, network: MaxPressure()),
     'maxpressure_det': ('python', _detector_maxpressure),
+    'greenwave_py': ('python', _plan(PlanController)),
+    'plan_actuated': ('python', _plan(PlanActuated)),
 }
 
+# Python baselines that run on the green-wave plan (signals.control = 'plan' timing)
+PLAN_BASELINES = ('greenwave_py', 'plan_actuated')
 
-def baseline(name, cfg=None):
+
+def baseline(name, cfg=None, network=None):
     """(tls mode, controller instance or None) of a baseline; cfg defaults to Config()."""
     try:
         tls, factory = BASELINES[name]
@@ -44,7 +61,8 @@ def baseline(name, cfg=None):
     if cfg is None:
         from tsc.config import Config
         cfg = Config()
-    return tls, factory(cfg)
+    return tls, factory(cfg, network)
 
 
-__all__ = ['BASELINES', 'Controller', 'DetectorMaxPressure', 'MaxPressure', 'baseline']
+__all__ = ['BASELINES', 'Controller', 'DetectorMaxPressure', 'MaxPressure', 'PLAN_BASELINES',
+           'PlanActuated', 'PlanController', 'baseline']
