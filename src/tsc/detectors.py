@@ -94,5 +94,10 @@ def detector_file(network, e2_length=50.0):
     tmp = f'{path}.{os.getpid()}.tmp'   # parallel runs may build it at the same time
     with open(tmp, 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    os.replace(tmp, path)
+    try:
+        os.replace(tmp, path)
+    except PermissionError:             # Windows: another run wrote it and has it open
+        if not os.path.exists(path):
+            raise
+        os.remove(tmp)
     return path

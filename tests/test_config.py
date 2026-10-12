@@ -80,3 +80,22 @@ def test_legacy_step1_run_config_defaults():
     assert cfg.observation.mode == 'grid' and not cfg.observation.comm
     assert cfg.observation.noise == 0.0 and cfg.signals.max_red is None
     assert cfg.agent.target_update == 'hard' and not cfg.agent.double and cfg.reward.kind == 'wait'
+
+
+def test_file_lock_is_exclusive_between_processes(tmp_path):
+    """Two processes building the same shared file: the second waits for the first."""
+    import subprocess
+    import sys
+    import time
+    from tsc.sumo_env import file_lock
+    lock = tmp_path / 'x.lock'
+    code = ('import sys, time; from tsc.sumo_env import file_lock\n'
+            f'with file_lock(r"{lock}", poll=0.05):\n'
+            f'    open(r"{tmp_path / "order.txt"}", "a").write("child\\n")\n')
+    with file_lock(str(lock)):
+        child = subprocess.Popen([sys.executable, '-c', code])
+        time.sleep(1.0)
+        (tmp_path / 'order.txt').open('a').write('parent\n')
+    assert child.wait(timeout=60) == 0
+    assert (tmp_path / 'order.txt').read_text().split() == ['parent', 'child']
+    assert not lock.exists()

@@ -8,6 +8,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import tsc
 from tsc import config as config_mod
+from tsc.sumo_env import file_lock  # noqa: F401  (re-exported for the experiments)
 from tsc.network import Network
 
 
