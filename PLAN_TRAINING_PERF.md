@@ -311,3 +311,27 @@ Files:
     - the first bench gave S ≈ 1.04 for the best mix, because `replay()` on the GPU is only 1.35× faster than on a CPU core (launch-bound).
   - So the P2000 is "works, not recommended".
   - RX 7900 XT: waiting for the coworker's checklist (`docs/GPU.md`).
+- **Tier 1 items 1–6: done, one commit each.** Every `tsc parity check` was IDENTICAL on all three configs,
+  every field: weights, optimizer, RNG and route hashes, train_log, checkpoint choice.
+  - Checks were cumulative after each item.
+  - Item 6 was also checked on its own (on top of items 1–3).
+  - `tests/test_dqn_parity.py` passes step by step for items 2–3.
+- **Item 7 (ring buffer): skipped.**
+  - At a full 50k buffer, sampling drops 0.265 → 0.10 ms per step (~3.5 %).
+  - But each agent adds ~360 transitions per episode, so the buffer only fills near episode 140 of 150: ~2 % on average.
+  - The cost would be about 2× replay RAM.
+- **Measured end-to-end S (step1/full, 10 episodes, `main` vs branch on the same seeds, concurrently):**
+
+  | load | config | training episode, median | 10 episodes incl. validation |
+  |---|---|---|---|
+  | 6 concurrent runs | step1/full | **1.17×** (23.9 → 20.4 s) | 1.11× |
+  | 6 concurrent runs | corridor/dir_coop | **1.10×** (37.9 → 34.3 s) | 1.09× |
+  | 2 concurrent runs | step1/full | **1.18×** (12.55 → 10.60 s) | 1.14× |
+
+  - Below the 1.2–1.3× hypothesis: the remaining time is dominated by real matmul work in the train step.
+  - The totals understate the gain: the branch runs finish first, so `main`'s final episode + validation run on a less loaded machine.
+  - Bigger gains need Tier 2 changes (e.g. `train_every`), which change results.
+- **Open:**
+  - M2: the coworker runs the RX 7900 XT checklist (`docs/GPU.md`).
+  - M3: cross-machine CPU diagnostic.
+  - M4: RTX 40xx check.

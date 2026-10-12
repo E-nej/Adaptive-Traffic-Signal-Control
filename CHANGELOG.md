@@ -67,6 +67,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reports a waiting vehicle.
 - `tsc accept` for worker runs; inter-process file lock for files parallel jobs share
   (`sumo_env.file_lock`).
+- Parity harness: `tests/test_dqn_parity.py` checks the agent against a frozen copy of the
+  v0.2.0 agent after every gradient step; `tsc parity record|check|compare` fingerprints a short
+  training run (log rows, weight/optimizer/RNG/route hashes) and reports the first difference.
+- Opt-in GPU training (`train.device = "gpu"`, CUDA or ROCm; `src/tsc/devices.py`, docs/GPU.md):
+  op determinism, memory growth, TF32 off; unsupported GPUs (RTX 50xx with TF 2.21, AMD
+  integrated GPUs) are refused. `tsc devices`, `tsc bench` (episodes/min under CPU/GPU worker
+  mixes) and `tsc train --gpu-workers K` (hybrid scheduling). Optional `cuda` extra.
+  GPU runs are reproducible on the same GPU but not bit-identical to CPU runs.
+- `run_info.json` records the software stack (packages, CPU and SIMD flags, TensorFlow build)
+  and the training device.
 
 ### Removed
 - RL controller selection per junction (2G: `[signals] control = "select"`, `select_interval`,
@@ -82,6 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Rewards, the queue metric and exact-count max-pressure cover whole approaches, including
   the road before a lane split (e.g. a left-turn bay). No effect on networks without splits.
+- Faster training with bit-identical results (parity-checked on step1/full, step1/base and
+  corridor/dir_coop): no SUMO emissions device in training/validation episodes (the
+  `co2_*` columns of `train_log.csv` are now 0; the CO2 term of the `multi` reward is
+  unaffected), a faster greedy `act()`, the soft target update fused into the gradient step,
+  the next episode's routes generated in the background, validation routes generated once,
+  and halting counts computed once per second. Evaluation output is unchanged.
+- Trained policies are evaluated on the CPU (`evaluate.device`), whatever they were trained on.
 
 ## [0.2.0] - Unreleased
 
