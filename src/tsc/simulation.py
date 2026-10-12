@@ -20,7 +20,7 @@ TLS_MODES = ('fixed', 'webster', 'actuated', 'python')
 class Simulation:
     def __init__(self, network, route_file, duration, out_dir, seed=0, tls='python',
                  additional=None, gui=False, decision_interval=5, max_green=None, max_red=None,
-                 e2_length=50.0):
+                 e2_length=50.0, begin=0, undeparted=False):
         if tls not in TLS_MODES:
             raise ValueError(f'Unknown tls mode: {tls!r}')
         self.network = network
@@ -41,13 +41,14 @@ class Simulation:
         self.cmd = [
             'sumo-gui' if gui else 'sumo',
             '-n', net, '-r', route_file,
-            '--begin', '0', '--end', str(duration),
+            '--begin', str(begin), '--end', str(begin + duration),
             '--seed', str(int(seed)),
             '--no-step-log', 'true', '--no-warnings', 'true',
             '--duration-log.disable', 'true',
             '--time-to-teleport', '300',
             '--tripinfo-output', self.tripinfo,
             '--tripinfo-output.write-unfinished', 'true',
+            '--tripinfo-output.write-undeparted', 'true' if undeparted else 'false',
             '--device.emissions.probability', '1',
             '--statistic-output', self.statistics,
         ]

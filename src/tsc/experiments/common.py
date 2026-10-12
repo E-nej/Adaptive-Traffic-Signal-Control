@@ -22,11 +22,12 @@ PLAN_CONTROLS = ('plan', 'hierarchy')
 
 
 def sim_kwargs(cfg):
-    """Simulation options for Python-controlled junctions."""
+    """Simulation options (Python-controlled junctions, start time, which trips count)."""
     # plan control switches on the plan's second; the policy still decides every interval
     interval = 1 if cfg.signals.control in PLAN_CONTROLS else cfg.signals.decision_interval
     return dict(decision_interval=interval, max_green=cfg.signals.max_green,
-                max_red=cfg.signals.max_red, e2_length=cfg.observation.e2_length)
+                max_red=cfg.signals.max_red, e2_length=cfg.observation.e2_length,
+                begin=cfg.demand.begin, undeparted=cfg.demand.count_undeparted)
 
 
 def save_run_info(cfg, out_dir):

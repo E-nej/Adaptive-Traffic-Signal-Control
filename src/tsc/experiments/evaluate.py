@@ -158,8 +158,8 @@ def run_task(task):
         tag = f'_{ec.which}' if ec.which != 'best' else ''
         meta = {'controller': f'{run_cfg.name}{tag}_s{seed}', 'config': run_cfg.name + tag,
                 'train_seed': seed}
-    if tls != 'python':
-        kwargs = {}
+    if tls != 'python':                     # SUMO runs the signals: only the scenario options
+        kwargs = {k: kwargs[k] for k in ('begin', 'undeparted')}
     needs_plan = getattr(controller, 'needs_plan', False)
     loaded = {}
 

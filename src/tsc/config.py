@@ -37,14 +37,21 @@ class NetworkConfig:
 @dataclass
 class DemandConfig:
     generator: str = 'random_trips'   # 'random_trips' (closed test network) | 'od'
+                                      # | 'file' (a published scenario's route files)
     profile: str = 'peak'             # see demand.PROFILES
     duration: int = 3600              # s, episode length
+    begin: int = 0                    # s, simulation start (time of day of 'file' demand)
     min_distance: float = 150.0       # m, shortest trip
     # generator 'od' (networks with open boundaries, see demand.py)
     major_share: float = 0.6          # share of trips between ends of the main road
     tidal_share: float = 0.5          # share of directional trips going along tidal_axis
     tidal_axis: list[float] = field(default_factory=lambda: [1.0, 0.0])
     tidal_random: bool = True         # draw the tidal direction per scenario
+    # generator 'file'
+    route_files: list[str] = field(default_factory=list)   # globs, relative to the repo
+    eval_files: int = 0               # with several files: the last ones, for evaluation only
+    count_undeparted: bool = False    # vehicles still waiting to enter at the end count in
+                                      # the delay (their departDelay so far), as in RESCO
 
 
 @dataclass

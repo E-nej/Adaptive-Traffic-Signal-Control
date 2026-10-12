@@ -99,3 +99,25 @@ def test_file_lock_is_exclusive_between_processes(tmp_path):
     assert child.wait(timeout=60) == 0
     assert (tmp_path / 'order.txt').read_text().split() == ['parent', 'child']
     assert not lock.exists()
+
+
+def test_file_demand_keeps_evaluation_files_apart(tmp_path):
+    """generator 'file': one file is always used; with several, evaluation scenarios only
+    use the last `eval_files` (in natural order: 2 before 10) and nothing else does."""
+    from tsc.demand import route_file_for
+    for i in range(1, 13):
+        (tmp_path / f'g_{i}.rou.xml').write_text('<routes/>')
+    d = config.DemandConfig(generator='file', route_files=[str(tmp_path / 'g_*.rou.xml')],
+                            eval_files=3)
+    names = lambda seeds_: {os.path.basename(route_file_for(d, s)) for s in seeds_}
+    assert names(seeds.evaluation(i) for i in range(10)) == {'g_10.rou.xml', 'g_11.rou.xml',
+                                                             'g_12.rou.xml'}
+    used = names([seeds.train(s, e) for s in range(3) for e in range(50)]
+                 + [seeds.validation(i) for i in range(5)] + [seeds.calibration(i) for i in range(5)])
+    assert used == {f'g_{i}.rou.xml' for i in range(1, 10)}
+    one = config.DemandConfig(generator='file', route_files=[str(tmp_path / 'g_1.rou.xml')])
+    assert route_file_for(one, seeds.evaluation(0)) == route_file_for(one, 5)
+    with pytest.raises(ValueError):
+        route_file_for(config.DemandConfig(generator='file', route_files=d.route_files), 0)
+    with pytest.raises(FileNotFoundError):
+        route_file_for(config.DemandConfig(generator='file', route_files=['nope/*.xml']), 0)

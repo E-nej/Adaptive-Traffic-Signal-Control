@@ -12,8 +12,17 @@ boundary point is the capacity of its road (lanes × speed).  `tidal_share` > 0.
 makes trips that travel along `tidal_axis` more likely than trips against it
 (e.g. a morning inbound peak); with `tidal_random` the direction is drawn per
 scenario.  Trips are routed by duarouter.
+
+generator 'file': the route files of a published scenario (`route_files`, globs;
+e.g. RESCO's calibrated Cologne / Ingolstadt demand).  The level is ignored.  With
+several files the seed picks one: evaluation scenarios use the last `eval_files`
+files (in natural order), everything else the rest, so a policy is never evaluated
+on a file it was trained on.
 """
 
+import glob
+import re
+import shutil
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -39,7 +48,34 @@ def generate_routes(network, demand, route_file, seed, rate_vph, flip=None):
                             demand.min_distance)
     if demand.generator == 'od':
         return od_trips(network, demand, route_file, seed, rate_vph, flip)
+    if demand.generator == 'file':
+        shutil.copyfile(route_file_for(demand, seed), route_file)
+        return route_file
     raise ValueError(f'Unknown demand generator: {demand.generator!r}')
+
+
+def _natural(path):
+    return [int(t) if t.isdigit() else t for t in re.split(r'(\d+)', path)]
+
+
+def route_file_for(demand, seed):
+    """Generator 'file': the route file of scenario `seed`."""
+    from tsc import seeds as seeds_mod
+    files = sorted({f for g in demand.route_files for f in glob.glob(g)}, key=_natural)
+    if not files:
+        raise FileNotFoundError(f'No route files match {demand.route_files} '
+                                f'(networks/benchmarks/fetch.py downloads the benchmarks)')
+    if len(files) == 1:
+        return files[0]
+    n_eval = demand.eval_files
+    if not 0 < n_eval < len(files):
+        raise ValueError(f'demand.eval_files must be in 1..{len(files) - 1} with {len(files)} '
+                         f'route files')
+    if seeds_mod.is_evaluation(seed):
+        pool = files[-n_eval:]
+        return pool[(seed - seeds_mod.EVALUATION) % n_eval]
+    pool = files[:-n_eval]
+    return pool[seed % len(pool)]
 
 
 def random_trips(network, route_file, seed, rate_vph, duration, profile='flat', min_distance=150.0):

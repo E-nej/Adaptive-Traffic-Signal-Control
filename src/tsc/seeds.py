@@ -49,3 +49,7 @@ def calibration(i):
 
 def evaluation(i):
     return EVALUATION + i
+
+
+def is_evaluation(seed):
+    return seed >= EVALUATION
