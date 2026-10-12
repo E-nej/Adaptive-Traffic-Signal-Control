@@ -1,0 +1,29 @@
+# Step 2H.3: trained hierarchies on Maribor vs the classic controllers (same scenarios as 3.4).
+#   tsc evaluate configs/hierarchy/evaluate_maribor.toml
+name = "hier_maribor"
+workers = 12
+
+[network]
+path = "networks/maribor/titova.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.2
+tidal_share = 0.7
+tidal_axis = [0.0, 1.0]
+tidal_random = true
+min_distance = 300.0
+
+[signals]
+actuated_loops = "sumo"
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[evaluate]
+baselines = ["actuated", "maxpressure_det", "greenwave_py", "actuated_py"]
+runs = ["outputs/train/hier_maribor_group/s*", "outputs/train/hier_maribor_network/s*"]
+levels = [2000, 4000, 6000, 7000, 8000]
+n_seeds = 10
