@@ -178,24 +178,124 @@ communication only "works" if wrong-neighbour messages hurt.
       Config: `configs/corridor/dir.toml`.
 - [x] 2E.3 Cooperative reward `[reward] neighbour_weight = α`: r_i + α·Σ r_neighbours
       (spatial discount, Chu et al. 2019). α = 0 reproduces the previous training exactly.
-- [ ] 2E.5 Corridor experiment, 5 seeds each, evaluated vs green wave / detector max-pressure
-      and checked with `tsc diagnose messages`:
+- [x] 2E.5 Corridor experiment, 5 seeds each (150 episodes), 10 held-out scenarios per level,
+      checked with `tsc diagnose messages`:
 
-      | config            | messages     | α   |
-      |-------------------|--------------|-----|
-      | corridor_full_nocomm | none      | 0   |
-      | corridor_full     | aggregate    | 0   |
-      | corridor_dir      | directional  | 0   |
-      | corridor_coop_nocomm | none      | 0.5 |
-      | corridor_dir_coop | directional  | 0.5 |
+      | config               | messages    | α   | delay [s] 1000 / 2000 / 3000 / 4000 / 5000 veh/h |
+      |----------------------|-------------|-----|---------------------------------------------------|
+      | green wave (baseline)| –           | –   | 45 / 48 / 56 / 72 / 127                            |
+      | corridor_full_nocomm | none        | 0   | 62 / 69 / 97 / 235 / 352                           |
+      | corridor_full        | aggregate   | 0   | 63 / 67 / 90 / 210 / 326                           |
+      | corridor_dir         | directional | 0   | 58 / 67 / 104 / 262 / 361                          |
+      | corridor_coop_nocomm | none        | 0.5 | 68 / 72 / 117 / 272 / 374                          |
+      | corridor_dir_coop    | directional | 0.5 | 66 / 75 / 136 / 292 / 384                          |
+
+      **Every free-stage RL variant loses badly to the green wave** (×3 at 4000 veh/h; also
+      worse than Webster / actuated from 3000 up): the agents switch per junction and break the
+      platoons (~7 stops per vehicle vs 1.5). Communication does help on the corridor, unlike on
+      the grid: `full` is 6–10 % better than `full_nocomm` at 3000–5000 (significant), and
+      directional messages are the first to carry neighbour-specific information (wrong-neighbour
+      messages cost `corridor_dir` +6–14 %). The cooperative reward hurts (+5 to +40 %).
 - [ ] 2E.4 Only if 2E.1–2E.3 show neighbour-specific use: parameter sharing + learned attention
       over neighbours (CoLight-style), CTDE / value decomposition (CVDMARL).
 - Later: a small grid (e.g. 3×4) with a road hierarchy as a second scenario.
 
+## Step 2F — RL on top of a coordinated plan
+Free stage choice cannot learn the coordination a green wave has by construction. Instead the
+policy *adjusts* the green-wave plan (`[signals] control = "plan"`, `controllers/plan.py`):
+every 5 s of green it picks FOLLOW (switch when the plan does), HOLD (extend the green, at most
+20 s past the plan) or EARLY (end it now; the next stage keeps it until the plan's own end).
+The plan's absolute timing stays the reference, so junctions stay coordinated; a junction two
+stages behind rejoins the plan.
+
+- [x] 2F.1 `plans.py` (plan file → stage windows; SUMO starts a cycle at t = offset),
+      `PlanActions`, baselines `greenwave_py` (Python replay of the plan, the exact reference)
+      and `plan_actuated` (classic coordinated-actuated: gap extension + early end).
+- [x] 2F.2 Plan library for training (green wave per level × direction from the calibration
+      scenarios); an episode runs its matching plan with probability 0.5, otherwise a random
+      one, so the policy learns to repair plans that do not fit. Validation: 3 levels × matching
+      and opposite-direction plan (6 runs).
+- [x] 2F.3 Evaluation regimes (`[evaluate] plan_level`, `plan_direction`): *tuned* (each level
+      and direction its own plan), *stale* (the 3000 veh/h plan everywhere) and *opposite* (the
+      other direction's plan: the AM plan in the PM peak). Stale costs the green wave almost
+      nothing on the corridor; opposite costs +60–90 % at 4000–5000 veh/h.
+- [x] 2F.4 Sweep, 3 seeds × 150 episodes. Learning no longer plateaus: validation improves by
+      16–38 s per 100 episodes vs 2.5–9 s noise between checkpoints (the old free-stage runs:
+      ±1–3 s per 100 episodes, i.e. flat after ~20 episodes).
+
+      | delay [s], opposite plans    | 1000 | 2000 | 3000 | 4000 | 5000 |
+      |------------------------------|------|------|------|------|------|
+      | green wave (SUMO)            | 60   | 67   | 77   | 117  | 243  |
+      | greenwave_py (reference)     | 66   | 70   | 80   | 124  | 251  |
+      | plan_actuated (classic)      | 66   | 96   | 98   | 109  | 187  |
+      | plan_nocomm                  | 57   | 65   | 73   | 94   | 180  |
+      | plan_dir (directional msgs)  | 55   | 62   | 71   | 93   | 177  |
+      | plan_dir_shared (+ shared net) | 56 | 60   | 67   | 89   | 183  |
+
+      **With a plan that does not fit the traffic, RL on the plan beats the plan by 10–29 %
+      (significant at 1000–5000) and classic coordinated-actuated control by 13–38 % at
+      1000–4000 (significant; tied at 5000).** With
+      tuned plans it only matches the green wave (best variant within ±2 % up to 4000 veh/h).
+      Messages help vs no messages: `plan_dir_shared` −5 to −11 % at 2000–4000 (significant, both
+      regimes), `plan_dir` −2 to −5 %. The "tuned" learning setup (lr 5e-4, τ 0.01, reward ×0.1,
+      faster ε decay) is worse everywhere; the free-stage RL with shared network + tuned setup is
+      still ×2.5 the green wave at 4000.
+- [ ] 2F.5 Clean communication test: `plan_dir_shared_long` vs `plan_nocomm_shared_long` (only
+      the messages differ), 5 seeds × 300 episodes.
+
+## Step 2G — Choosing the controller per junction
+Each road may have a different best controller, so each junction picks one of several experts
+for the next ~cycle (`[signals] control = "select"`, `controllers/select.py`): green wave,
+coordinated-actuated, detector max-pressure, isolated gap-actuated (`[signals] experts`).
+Switching is safe (SignalHead intergreens; a plan expert rejoins the plan).
+
+- [x] 2G.1 Non-learning baseline `tsc assign`: greedy search for the best fixed expert per
+      junction and demand level on the calibration scenarios (`select_assigned`).
+- [x] 2G.2 RL selector (DQN, shared network, decision every 90 s, γ = 0.8), with and without
+      neighbours' choices as messages, local and cooperative (α = 1) reward.
+- Results:
+  - Corridor: the best fixed assignment is the green wave everywhere (≈ `greenwave_py`). The RL
+    selector is worse than the green wave (117–128 vs 74 s at 4000 veh/h, tuned plans): it picks
+    max-pressure ~50 % of the time — that shortens the junction's own queue while breaking the
+    neighbours' green wave. The cooperative reward does not fix it (126–155 s).
+  - Maribor (see step 3): the best fixed assignment uses all four experts at every level and
+    beats the green wave by 2–25 %, but a single isolated controller is better still
+    (max-pressure at 2000–4000, SUMO actuated at 6000–8000). The RL selector does not beat the
+    fixed assignment. **Negative result: controller selection is easy to state but the reward
+    for a 90 s choice is too delayed and noisy for DQN here.**
+
+## Step 3 — Maribor, Titova cesta district
+- [x] 3.1 `networks/maribor/`: Overpass extract (ODbL) around Titova cesta, `build.py`
+      (main roads, joined junction clusters, roads leaving the extract removed): 2.8 × 3.3 km,
+      21 signals (Titova cesta, Pobreška cesta, Cesta proletarskih brigad, Partizanska, …),
+      24 boundary points. OSM has no signal timings: netconvert plans as for the synthetic networks.
+- [x] 3.2 Generalisations for real networks (synthetic networks unchanged, verified):
+      neighbours limited to 1000 m of road; one-way boundary points (cut dual carriageways);
+      area detectors continue upstream on short OSM approach lanes; fixed-time plans whose cycle
+      is too short for a junction's minimum greens are recomputed.
+- [x] 3.3 Demand: O/D gravity model, 20 % through traffic on the eastern trunk, tidal 70/30
+      north–south. Probe: no congestion up to 6000 veh/h, saturation ≈ 8000, gridlock from 10000.
+      Evaluation levels 2000–8000.
+- [x] 3.4 Baselines (10 scenarios per level), delay [s]:
+
+      | controller        | 2000 | 4000 | 6000 | 7000 | 8000 |
+      |-------------------|------|------|------|------|------|
+      | fixed             | 69   | 134  | 214  | 275  | 345  |
+      | Webster           | 53   | 68   | 88   | 124  | 180  |
+      | green wave        | 54   | 71   | 89   | 113  | 170  |
+      | actuated (SUMO)   | 50   | 57   | **70** | **93** | **159** |
+      | max-pressure (detectors) | **43** | **51** | 87 | 127 | 207 |
+      | best fixed assignment | 45 | 54 | 86 | 110 | 169 |
+
+      Unlike the corridor, the green wave is not the reference here: signals are sparse and far
+      apart, so isolated adaptive control wins. Opposite-direction plans cost the green wave
+      +33–37 % at 6000–7000 veh/h.
+- [ ] 3.5 RL on the plan (`configs/plan/maribor_dir_shared.toml`, 3 seeds).
+
 ## Later (not now)
-- Step 3: real Maribor corridor (OSM → netconvert, manual fixes, counts → routeSampler).
+- Real counts (municipality / DRSI counters) → routeSampler, real signal plans.
 - Step 4: pedestrians at selected crossings.
-- Graph-based / parameter-shared agents for larger networks.
+- Combine 2F and 2G: plan-RL as one of the experts; learned attention over neighbours.
 
 ---
 
