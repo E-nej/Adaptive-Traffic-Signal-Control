@@ -91,7 +91,7 @@ def test_detector_noise_is_seeded(test5):
         assert np.array_equal(a.observe(sim, tl), b.observe(sim, tl))
 
 
-@pytest.mark.parametrize('kind', ['wait', 'multi', 'queue', 'det_queue'])
+@pytest.mark.parametrize('kind', ['wait', 'multi', 'queue', 'det_queue', 'queue_pressure'])
 def test_rewards_are_per_lane(test5, kind):
     tl = test5.tl_ids[0]
     r = Reward(test5, kind)
@@ -169,3 +169,34 @@ def test_smdp_discount_is_used():
     for _ in range(400):
         agent.replay()
     assert agent.q_values(s)[0] == pytest.approx(1.0, abs=0.1)
+
+
+def test_n_step_returns():
+    """n_step = 3 stores the discounted sum of 3 rewards, bootstrapped 3 decisions later, per
+    junction (key); the episode's last, shorter sequences are stored at its end."""
+    import tensorflow as tf  # noqa: F401
+    from tsc.agents.dqn import DQNAgent
+    agent = DQNAgent(1, 2, gamma=0.5, n_step=3, hidden=(4,))
+    mask = np.array([True, True])
+    state = [np.array([float(i)], dtype=np.float32) for i in range(6)]
+    for i in range(4):
+        agent.store(state[i], 0, 1.0, state[i + 1], mask, key='a')
+    agent.store(state[0], 1, 8.0, state[5], mask, key='b')          # another junction
+    assert len(agent.buffer) == 2
+    s, a, r, s2, _, d = agent.buffer[0]
+    assert s[0] == 0 and s2[0] == 3 and r == pytest.approx(1 + 0.5 + 0.25) and d == 0.125
+    assert agent.buffer[1][0][0] == 1
+    agent.end_episode()
+    assert len(agent.buffer) == 5                       # 'a': 2 shorter, 'b': 1
+    assert sorted(round(t[5], 3) for t in list(agent.buffer)[2:]) == [0.25, 0.5, 0.5]
+
+
+def test_dueling_head_learns():
+    import tensorflow as tf  # noqa: F401
+    from tsc.agents.dqn import DQNAgent
+    agent = DQNAgent(2, 3, lr=0.01, batch_size=1, learn_start=1, hidden=(8,), dueling=True)
+    s = np.array([1.0, 0.0], dtype=np.float32)
+    agent.store(s, 2, 1.0, s, np.array([True] * 3), discount=0.0)
+    for _ in range(400):
+        agent.replay()
+    assert agent.q_values(s)[2] == pytest.approx(1.0, abs=0.1)

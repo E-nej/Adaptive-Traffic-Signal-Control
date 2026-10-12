@@ -1,5 +1,7 @@
 """DQN agent with switchable Double DQN / target-update variants (for ablations).
 
+Optional extras: a dueling head (V + A - mean A) and n-step returns.
+
 Same network as the paper (Dense 400 linear → Dense 400 ReLU → linear).
 The soft (Polyak) target update is applied after every gradient step, as is
 standard; the paper applied it once per episode with tau=0.005, which leaves
@@ -22,8 +24,19 @@ tf.config.threading.set_inter_op_parallelism_threads(_threads)
 from tensorflow import keras  # noqa: E402
 
 
-def build_qnet(n_in, n_out, hidden=(400, 400)):
-    """The paper's network: first hidden layer linear, the others ReLU, linear output."""
+def build_qnet(n_in, n_out, hidden=(400, 400), dueling=False):
+    """The paper's network: first hidden layer linear, the others ReLU, linear output.
+
+    dueling: the output is V(s) + A(s, a) - mean_a A(s, a) (Wang et al. 2016).
+    """
+    if dueling:
+        x = inp = keras.Input(shape=(n_in,))
+        for i, units in enumerate(hidden):
+            x = keras.layers.Dense(units, activation=None if i == 0 else 'relu')(x)
+        v = keras.layers.Dense(1)(x)
+        adv = keras.layers.Dense(n_out)(x)
+        out = v + adv - keras.ops.mean(adv, axis=1, keepdims=True)
+        return keras.Model(inp, out)
     layers = [keras.Input(shape=(n_in,))]
     for i, units in enumerate(hidden):
         layers.append(keras.layers.Dense(units, activation=None if i == 0 else 'relu'))
@@ -38,11 +51,13 @@ class DQNAgent:
         return cls(n_states, n_actions, double=cfg.double, target_update=cfg.target_update,
                    tau=cfg.tau, hard_every=cfg.hard_every, gamma=cfg.gamma, lr=cfg.lr,
                    batch_size=cfg.batch_size, buffer_size=cfg.buffer_size,
-                   learn_start=cfg.learn_start, hidden=tuple(cfg.hidden))
+                   learn_start=cfg.learn_start, hidden=tuple(cfg.hidden),
+                   dueling=cfg.dueling, n_step=cfg.n_step)
 
     def __init__(self, n_states, n_actions, double=True, target_update='soft',
                  tau=0.005, hard_every=1000, gamma=0.95, lr=2.5e-4,
-                 batch_size=100, buffer_size=50000, learn_start=500, hidden=(400, 400)):
+                 batch_size=100, buffer_size=50000, learn_start=500, hidden=(400, 400),
+                 dueling=False, n_step=1):
         self.n_states = n_states
         self.n_actions = n_actions
         self.double = double
@@ -54,9 +69,11 @@ class DQNAgent:
         self.learn_start = max(learn_start, batch_size)
         self.buffer = deque(maxlen=buffer_size)
         self.grad_steps = 0
+        self.n_step = n_step
+        self.recent = {}                  # key -> last transitions not yet n steps old
 
-        self.q = build_qnet(n_states, n_actions, hidden)
-        self.q_target = build_qnet(n_states, n_actions, hidden)
+        self.q = build_qnet(n_states, n_actions, hidden, dueling)
+        self.q_target = build_qnet(n_states, n_actions, hidden, dueling)
         self.q_target.set_weights(self.q.get_weights())
         self.opt = keras.optimizers.Adam(learning_rate=lr, clipnorm=1.0)
         self.huber = keras.losses.Huber()
@@ -74,9 +91,39 @@ class DQNAgent:
         q[~mask] = -np.inf
         return int(np.argmax(q))
 
-    def store(self, s, a, r, s2, mask2, discount=None):
-        """discount: of the next state's value (default gamma; SMDP: gamma ** seconds)."""
-        self.buffer.append((s, a, r, s2, mask2, self.gamma if discount is None else discount))
+    def store(self, s, a, r, s2, mask2, discount=None, key=None):
+        """discount: of the next state's value (default gamma; SMDP: gamma ** seconds).
+
+        With n_step > 1 the stored transition is n decisions long: the discounted sum of
+        n rewards, bootstrapped from the state n decisions later.  `key` separates the
+        decision sequences of junctions sharing one agent.
+        """
+        d = self.gamma if discount is None else discount
+        if self.n_step == 1:
+            self.buffer.append((s, a, r, s2, mask2, d))
+            return
+        recent = self.recent.setdefault(key, deque())
+        recent.append((s, a, r, s2, mask2, d))
+        if len(recent) == self.n_step:
+            self.buffer.append(self._n_step(recent))
+            recent.popleft()
+
+    def end_episode(self):
+        """Store the last, shorter n-step transitions of the episode."""
+        for recent in self.recent.values():
+            while recent:
+                self.buffer.append(self._n_step(recent))
+                recent.popleft()
+        self.recent = {}
+
+    @staticmethod
+    def _n_step(seq):
+        s, a = seq[0][:2]
+        ret, disc = 0.0, 1.0
+        for _, _, r, s2, mask2, d in seq:
+            ret += disc * r
+            disc *= d
+        return s, a, ret, s2, mask2, disc
 
     def replay(self):
         if len(self.buffer) < self.learn_start:

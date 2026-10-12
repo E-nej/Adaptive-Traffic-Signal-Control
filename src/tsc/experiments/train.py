@@ -297,7 +297,8 @@ def train_one(cfg, out_dir):
 
     network = network_for(cfg)
     observer = make_observer(network, cfg, seed)
-    reward_fn = Reward(network, cfg.reward.kind, cfg.reward.neighbour_weight)
+    reward_fn = Reward(network, cfg.reward.kind, cfg.reward.neighbour_weight,
+                       cfg.reward.pressure_weight)
     greedy = make_controller(network, observer, cfg)
     agents, actions = greedy.agents, greedy.actions
     rng = np.random.default_rng(seed)
@@ -369,7 +370,7 @@ def train_one(cfg, out_dir):
                             r, discount = scale * total, gamma ** secs
                         else:           # mean per second, one discount per decision
                             r, discount = scale * total / max(1, secs), None
-                        agent.store(ps, pa, r, s, mask, discount)
+                        agent.store(ps, pa, r, s, mask, discount, key=tl_id)
                         rewards.append(r)
                         loss = agent.replay()
                         if loss is not None:
@@ -387,6 +388,9 @@ def train_one(cfg, out_dir):
                 acc[tl_id][1] += 1
 
         m = sim.close()
+        for agent in {id(a): a for a in (agents or {}).values()}.values():
+            if hasattr(agent, 'end_episode'):
+                agent.end_episode()
         row = {'episode': ep, 'level': round(level, 1), 'epsilon': round(epsilon, 3),
                'mean_reward': float(np.mean(rewards)) if rewards else 0.0,
                'mean_loss': float(np.mean(losses)) if losses else float('nan'), **m}
