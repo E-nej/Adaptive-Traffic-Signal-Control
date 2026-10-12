@@ -130,7 +130,7 @@ def run_task(task):
                 table = {float(k): v for k, v in json.load(f).items()}
             near = min(table, key=lambda x: abs(x - level))
             tls, controller = 'python', make_fixed(network, cfg, table[near])
-            kwargs = sim_kwargs(config_mod.replace(cfg, signals={'control': 'select'}))
+            kwargs = sim_kwargs(config_mod.replace(cfg, signals={'control': 'plan'}))
         elif name in SECOND_BASELINES:
             plan_cfg = config_mod.replace(cfg, signals={'control': 'plan'})
             kwargs = sim_kwargs(plan_cfg)

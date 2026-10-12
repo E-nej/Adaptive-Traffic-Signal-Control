@@ -17,7 +17,7 @@ def network_for(cfg):
 
 
 # control modes that run on a coordinated plan (SignalHead ready every second)
-PLAN_CONTROLS = ('plan', 'select', 'hierarchy')
+PLAN_CONTROLS = ('plan', 'hierarchy')
 
 
 def sim_kwargs(cfg):

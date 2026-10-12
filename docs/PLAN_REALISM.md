@@ -279,6 +279,8 @@ Switching is safe (SignalHead intergreens; a plan expert rejoins the plan).
     (max-pressure at 2000–4000, SUMO actuated at 6000–8000). The RL selector does not beat the
     fixed assignment. **Negative result: controller selection is easy to state but the reward
     for a 90 s choice is too delayed and noisy for DQN here.**
+- The RL selector (`control = "select"`) was removed after 2H (the hierarchy replaces it);
+  it is in git history up to commit `18e4cf4`. The experts (`ExpertPool`) and `tsc assign` stay.
 
 ## Step 3 — Maribor, Titova cesta district
 - [x] 3.1 `networks/maribor/`: Overpass extract (ODbL) around Titova cesta, `build.py`
@@ -370,10 +372,24 @@ win Maribor), with RL adding gains on top. Two levels (`[signals] control = "hie
 - [x] 2H.1 Manager with `worker = "off"`: `configs/hierarchy/{maribor_network,maribor_group,
       corridor_network}.toml`, tests in `tests/test_hierarchy.py`.
 - [x] 2H.2 Residual workers (`worker = "residual"`).
-- [ ] 2H.3 Train manager + workers together, 3 seeds × 150 episodes:
-      `configs/hierarchy/{maribor_network,maribor_group,corridor_network}.toml` (left out:
-      per-junction scope, which is 2G, and the variants without workers). Evaluate against the
-      best classic controller per network and the uniform experts (`manager = "fixed"`).
+- [x] 2H.3 Train manager + workers together, 3 seeds × 150 episodes:
+      `configs/hierarchy/{maribor_network,maribor_group,corridor_network}.toml`. **Fails**: up to
+      +104 % delay vs the green wave on the corridor, +23–39 % vs SUMO actuated at 6000–8000 on
+      Maribor. Causes (ablations): the queue reward makes the manager prefer max-pressure (short
+      queues, twice the delay of the green wave); workers trained under the wrong experts hurt
+      (+5 to +42 %); and two worker settings (`max_red = 150`, `hold_guard`) weakened the experts.
+      Fixes:
+      - v2: DQN manager with the `delay` reward, a default expert, a fallback checkpoint and
+        `tsc accept`;
+      - v3c: a lookup-table manager with the experts set up exactly as their baselines.
+
+      v3c beats every single expert on the corridor (69.4 vs 73.8 s, matched plans; 99.6 vs
+      102.8 s, stale plans) and equals max-pressure on Maribor (83.3 s). Full report:
+      [HIERARCHY_REPORT.md](HIERARCHY_REPORT.md).
+- [ ] 2H.5 Expert-specific workers: one worker per expert, trained with that expert always active
+      (delay reward), kept only if it beats its expert alone; table rebuilt over expert + worker.
+- [ ] 2H.6 Table: "does the plan fit" input (stale plans); SUMO's own actuated program as the
+      actuated expert.
 - [ ] 2H.4 Imitation warm start; leave-one-network-out test (train on two networks, test on
       the third).
 
@@ -455,3 +471,8 @@ uv run tsc diagnose messages configs/step2/evaluate.toml         # do agents use
   overriding 122 s plan cycles (selector uses 150 s).
 - 2026-10-12: 2H started (branch `2h-hierarchy`): the actuated expert fixed (2H.0), manager
   implemented (2H.1), residual workers (2H.2); training of 2H.3 started.
+- 2026-10-12 (evening): 2H.3 done. The jointly trained hierarchy fails on both networks; with the
+  delay reward, a default expert and acceptance on fresh scenarios (v2) it reaches SUMO actuated
+  on Maribor, and a lookup-table manager (v3c) beats every single expert on the corridor. Two
+  worker settings (max-red shield, hold guard) had been handicapping the experts. RL controller
+  selection (2G) removed. RESCO benchmark scenarios fetched (`networks/benchmarks/fetch.py`).

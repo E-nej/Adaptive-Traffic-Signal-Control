@@ -59,9 +59,17 @@ def validate(network, cfg, controller, work_dir, library=None):
     Plan control: every scenario runs once with its matching plan and once with the
     opposite direction's plan of the same level (a plan that does not fit the demand).
     """
+    return float(np.mean(scenario_delays(network, cfg, controller, work_dir, library)))
+
+
+def scenario_delays(network, cfg, controller, work_dir, library=None, per_level=1,
+                    seed_of=seeds_mod.validation):
+    """Delay of every (scenario, plan variant) at the validation levels, `per_level`
+    scenarios per level with seeds `seed_of(i)` (validation: one per level)."""
     delays = []
-    for i, level in enumerate(cfg.train.val_levels):
-        seed = seeds_mod.validation(i)
+    jobs = [(lv, k) for k in range(per_level) for lv in cfg.train.val_levels]
+    for i, (level, _) in enumerate(jobs):
+        seed = seed_of(i)
         route = generate_routes(network, cfg.demand, os.path.join(work_dir, 'val.rou.xml'), seed, level)
         variants = [None]
         if library is not None:
@@ -76,11 +84,151 @@ def validate(network, cfg, controller, work_dir, library=None):
             m = run_episode(network, controller, route, cfg.demand.duration,
                             os.path.join(work_dir, 'val'), seed=seed, **sim_kwargs(cfg))
             delays.append(m['delay'])
-    return float(np.mean(delays))
+    return delays
 
 
 def nearest_level(levels, level):
     return min(levels, key=lambda x: abs(x - level))
+
+
+def _default_expert(cfg, network, greedy, work_dir, library, out_dir, label):
+    """Hierarchy with a default expert: validate every expert alone (workers agreeing),
+    set the default ('auto': the best one) and save it alone as the first 'best'
+    checkpoint, so the run deploys it unless the learned policy beats it on validation.
+    Returns its validation delay."""
+    import json
+    actions = greedy.actions
+    actions.set_training(False, 0.0)
+    vals = {}
+    for e, name in enumerate(actions.names):
+        actions.force(e)
+        vals[name] = validate(network, cfg, greedy, work_dir, library)
+    name = cfg.hierarchy.default_expert
+    if name == 'auto':
+        name = min(vals, key=vals.get)
+    default = actions.names.index(name)
+    actions.set_default(default)
+    actions.force(default)
+    greedy.save(out_dir, 'best')
+    actions.force(None)
+    with open(os.path.join(out_dir, 'experts_val.json'), 'w') as f:
+        json.dump({'val_delay': vals, 'default': name}, f, indent=1)
+    print(f"[{label}] experts alone (val delay): "
+          + ', '.join(f'{n} {v:.1f}' for n, v in vals.items()) + f" -> default {name}", flush=True)
+    return vals[name]
+
+
+def accept(run_dir, per_level=None, alpha=0.05):
+    """Hierarchy with a default expert: does the best checkpoint beat the default expert
+    alone?  Both run on fresh scenarios (acceptance seeds, `per_level` per validation
+    level), paired; the learned policy is kept only if its mean delay is lower and a
+    one-sided Wilcoxon test gives p < alpha, else the best checkpoint is switched to the
+    default alone.  Validation picked the checkpoint as the best of many noisy readings,
+    so its own score is biased in its favour.  Writes accept.json; returns its content."""
+    import json
+    from scipy import stats
+    from tsc.experiments.runs import load_policy, load_run_config
+    cfg = load_run_config(run_dir)
+    per_level = per_level or cfg.hierarchy.accept_scenarios or 4
+    network = network_for(cfg)
+    library = load_library(network, cfg) if cfg.signals.control in PLAN_CONTROLS else None
+    policy, _ = load_policy(run_dir, network, 'best')
+    actions = policy.actions
+    manager = actions.manager
+    if manager.default is None:
+        raise ValueError(f'{run_dir}: no default expert (hierarchy.default_expert)')
+    default = actions.names[manager.default]
+    out = {'default': default, 'scenarios': per_level * len(cfg.train.val_levels)}
+    if manager.forced is not None:          # validation never beat the default
+        out.update(deployed=default, reason='best checkpoint is already the default')
+    else:
+        work_dir = os.path.join(run_dir, 'work')
+        os.makedirs(work_dir, exist_ok=True)
+        args = (network, cfg, policy, work_dir, library, per_level, seeds_mod.acceptance)
+        learned = np.array(scenario_delays(*args))
+        actions.force(manager.default)
+        alone = np.array(scenario_delays(*args))
+        diff = learned - alone
+        p = float(stats.wilcoxon(diff, alternative='less').pvalue) if diff.any() else 1.0
+        keep = diff.mean() < 0 and p < alpha
+        if keep:
+            actions.force(None)
+        actions.save_meta(run_dir, 'best')
+        out.update(deployed='learned' if keep else default, p=p,
+                   learned=float(learned.mean()), alone=float(alone.mean()),
+                   change=float(diff.mean() / alone.mean()))
+    with open(os.path.join(run_dir, 'accept.json'), 'w') as f:
+        json.dump(out, f, indent=1)
+    return out
+
+
+TABLE_EPISODE = 90000       # table scenarios: training seeds, episodes 90000+ (no overlap)
+
+
+def _table_task(task):
+    """One expert alone (workers agreeing) on one scenario: (level, expert, delay,
+    [(flow, jam) of every interval])."""
+    cfg, level, k, expert, work_dir = task
+    network = network_for(cfg)
+    (seed,) = cfg.train.seeds
+    route_seed = seeds_mod.train(seed, TABLE_EPISODE + k)
+    controller = make_controller(network, make_observer(network, cfg, seed), cfg)
+    controller.actions.force(expert)
+    controller.reseed(route_seed)
+    run_dir = os.path.join(work_dir, f'table_{level:.0f}_{k}_{expert}')
+    os.makedirs(run_dir, exist_ok=True)
+    route = generate_routes(network, cfg.demand, os.path.join(run_dir, 'r.rou.xml'), route_seed, level)
+    if cfg.signals.control in PLAN_CONTROLS:
+        flip = scenario_flip(cfg.demand, route_seed) if is_directional(cfg.demand) else None
+        library = load_library(network, cfg)
+        controller.set_plans(library[(nearest_level(cfg.train.plan_levels, level), flip)])
+    m = run_episode(network, controller, route, cfg.demand.duration, run_dir, seed=route_seed,
+                    **sim_kwargs(cfg))
+    return level, expert, m['delay'], [list(f) for f in controller.actions.manager.flows]
+
+
+def build_table(cfg, greedy, out_dir, label):
+    """Manager 'table': every expert at every level of the grid (table_scenarios scenarios
+    with matching plans), the best one per level by mean delay, keyed by the network flow
+    and jam ratio the manager measured at that level in each interval (mean over experts
+    and scenarios).  Saves it as the 'best' and 'final' policy and the measurements as
+    table.csv (delays) and table_keys.csv (readings)."""
+    import pandas as pd
+    h, tc = cfg.hierarchy, cfg.train
+    levels = h.table_levels or list(np.linspace(tc.level_min, tc.level_max, 9))
+    actions = greedy.actions
+    work_dir = os.path.join(out_dir, 'work')
+    tasks = [(cfg, float(lv), k, e, work_dir) for lv in levels for k in range(h.table_scenarios)
+             for e in range(len(actions.names))]
+    results = list(run_parallel(_table_task, tasks, cfg.workers))
+    df = pd.DataFrame([r[:3] for r in results], columns=['level', 'expert', 'delay'])
+    df['expert'] = [actions.names[e] for e in df.expert]
+    df.sort_values(['level', 'expert']).to_csv(os.path.join(out_dir, 'table.csv'), index=False)
+    mean = df.groupby(['level', 'expert']).delay.mean().unstack()
+    best = mean.idxmin(axis=1)
+    readings = pd.DataFrame([(r[0], i, f, j) for r in results for i, (f, j) in enumerate(r[3])],
+                            columns=['level', 'interval', 'flow', 'jam'])
+    keys = readings.groupby(['level', 'interval'])[['flow', 'jam']].mean()
+    keys.to_csv(os.path.join(out_dir, 'table_keys.csv'))
+    table = [(keys.loc[lv].to_numpy(), actions.names.index(best[lv])) for lv in mean.index]
+    actions.manager.table = table
+    actions.set_default(actions.names.index(best.value_counts().idxmax()))
+    for which in ('best', 'final'):
+        greedy.save(out_dir, which)
+    print(f'[{label}] table (level: mean flow, jam -> expert): '
+          + ', '.join(f'{lv:.0f}: {keys.loc[lv].flow.mean():.3f}, {keys.loc[lv].jam.mean():.3f} '
+                      f'-> {best[lv]}' for lv in mean.index), flush=True)
+    return table
+
+
+def _accept_task(task):
+    run_dir, per_level = task
+    return run_dir, accept(run_dir, per_level)
+
+
+def accept_runs(run_dirs, per_level=None, workers=1):
+    """accept() for several runs in parallel; yields (run_dir, result)."""
+    return run_parallel(_accept_task, [(d, per_level) for d in run_dirs], workers)
 
 
 def load_library(network, cfg):
@@ -126,6 +274,11 @@ def train_one(cfg, out_dir):
 
     has_workers = bool(agents)
     set_training = getattr(actions, 'set_training', None)
+    if cfg.signals.control == 'hierarchy' and cfg.hierarchy.manager == 'table':
+        build_table(cfg, greedy, out_dir, label)        # nothing to train
+        return
+    if cfg.signals.control == 'hierarchy' and cfg.hierarchy.default_expert:
+        best_val = _default_expert(cfg, network, greedy, work_dir, library, out_dir, label)
 
     for ep in range(tc.episodes):
         t0 = time.time()
@@ -215,3 +368,8 @@ def train_one(cfg, out_dir):
     greedy.save(out_dir, 'final')
     if log_file is not None:
         log_file.close()
+    h = cfg.hierarchy
+    if cfg.signals.control == 'hierarchy' and h.default_expert and h.accept_scenarios:
+        result = accept(out_dir)
+        print(f"[{label}] acceptance: deployed {result['deployed']} "
+              f"({result.get('change', 0):+.1%}, p={result.get('p', float('nan')):.3f})", flush=True)

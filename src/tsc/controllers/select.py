@@ -1,4 +1,5 @@
-"""Controller selection (step 2G): each junction picks which controller runs it.
+"""Expert controllers and switching between them (used by the hierarchy, step 2H, and the
+best fixed assignment per junction, `tsc assign`).
 
 Experts (all Python-controlled, all on the same detectors):
 
@@ -7,19 +8,14 @@ Experts (all Python-controlled, all on the same detectors):
     maxpressure    : max-pressure on the E2 detectors (acyclic, no coordination)
     actuated       : isolated gap-based actuated control, as SUMO's 'actuated' (GapActuated)
 
-A selector uses a subset of them ([signals] experts, in this order of indices).
-Every `select_interval` seconds (about one cycle) the policy picks an expert per
-junction; between choices the chosen expert controls the junction.  Inactive
-experts keep their state up to date, and a plan expert that takes over again
-rejoins the plan's timing (PlanActions.rejoin), so switching is always safe (the
-SignalHead enforces minimum green and intergreens).
+An ExpertPool holds a subset of them ([signals] experts, in this order of indices) and
+which one runs each junction.  Inactive experts keep their state up to date, and a plan
+expert that takes over again rejoins the plan's timing (PlanActions.rejoin), so switching
+is always safe (the SignalHead enforces minimum green and intergreens).
 
-The policy's extra features are the junction's own expert and, with
-communication, the share of its neighbours running each expert: a green wave
-only helps if the neighbours run it too.
+(Step 2G learned the choice per junction with DQN; it failed on the corridor and on Maribor
+and was removed. See PLAN_REALISM.md.)
 """
-
-import numpy as np
 
 from tsc.controllers.base import Controller
 from tsc.controllers.maxpressure import DetectorMaxPressure
@@ -82,22 +78,19 @@ class GapActuated(Controller):
         return (head.stage + 1) % len(self.network.greens[tl_id])
 
 
-class SelectorActions:
-    """Action = index (into `experts`) of the expert that runs the junction until the next
-    choice."""
+class ExpertPool:
+    """The experts and which one runs each junction (index into `experts`)."""
 
     needs_plan = True
 
-    def __init__(self, network, select_interval=90, interval=5, max_extension=20,
-                 noise=0.0, dropout=0.0, e2_length=50.0, comm=True, seed=0,
-                 experts=DEFAULT_EXPERTS, actuated_loops='stopline', hold_guard=False):
+    def __init__(self, network, interval=5, max_extension=20, noise=0.0, dropout=0.0,
+                 e2_length=50.0, seed=0, experts=DEFAULT_EXPERTS, actuated_loops='stopline',
+                 hold_guard=False):
         unknown = set(experts) - set(EXPERTS)
         if unknown:
             raise ValueError(f'Unknown experts {sorted(unknown)}; choose from {EXPERTS}')
         self.network = network
-        self.select_interval = select_interval
         self.interval = interval
-        self.comm = comm
         self.names = list(experts)
         make = {
             'greenwave': lambda: PlanController(network, interval, max_extension,
@@ -109,8 +102,6 @@ class SelectorActions:
             'actuated': lambda: GapActuated(network, loops=actuated_loops),
         }
         self.experts = [make[name]() for name in self.names]
-        self.n_actions = len(self.experts)
-        self.extra_dim = 2 * self.n_actions
         self.plan_experts = [i for i, e in enumerate(self.experts) if isinstance(e, PlanController)]
         self.periodic = [i for i, n in enumerate(self.names) if n == 'maxpressure']
 
@@ -127,23 +118,11 @@ class SelectorActions:
         for e in self.experts:
             e.reset(sim)
         self.active = {tl_id: 0 for tl_id in self.network.tl_ids}
-        self.next_choice = {tl_id: 0 for tl_id in self.network.tl_ids}
         self.mp_stage = {}
 
     def tick(self, sim):
         for e in self.experts:
             e.tick(sim)
-
-    # ------------------------------------------------------------------
-
-    def decides(self, sim, tl_id):
-        if sim.t >= self.next_choice[tl_id]:
-            self.next_choice[tl_id] = sim.t + self.select_interval
-            return True
-        return False
-
-    def mask(self, sim, tl_id):
-        return np.ones(self.n_actions, dtype=bool)
 
     def stage(self, sim, tl_id, action):
         self.activate(sim, tl_id, action)
@@ -168,16 +147,6 @@ class SelectorActions:
             self.mp_stage[tl_id] = self.experts[action].act(sim, tl_id)
         return self.mp_stage[tl_id]
 
-    def features(self, sim, tl_id):
-        own = np.zeros(self.n_actions, dtype=np.float32)
-        own[self.active[tl_id]] = 1.0
-        nb = np.zeros(self.n_actions, dtype=np.float32)
-        neighbours = self.network.neighbours[tl_id]
-        if self.comm and neighbours:
-            for n in neighbours:
-                nb[self.active[n]] += 1.0 / len(neighbours)
-        return np.concatenate([own, nb])
-
 
 class FixedSelection(PlanController):
     """Non-learning selector: a fixed expert per junction ({tl_id: expert index}, default
@@ -187,7 +156,7 @@ class FixedSelection(PlanController):
     needs_plan = True
 
     def __init__(self, network, assignment=None, default=0, **kwargs):
-        self.actions = SelectorActions(network, **kwargs)
+        self.actions = ExpertPool(network, **kwargs)
         self.assignment = dict(assignment or {})
         self.default = default
 
@@ -207,4 +176,4 @@ class FixedSelection(PlanController):
         return self.actions.stage(sim, tl_id, self.assignment.get(tl_id, self.default))
 
 
-__all__ = ['DEFAULT_EXPERTS', 'EXPERTS', 'FixedSelection', 'GapActuated', 'SelectorActions']
+__all__ = ['DEFAULT_EXPERTS', 'EXPERTS', 'ExpertPool', 'FixedSelection', 'GapActuated']

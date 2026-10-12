@@ -53,14 +53,12 @@ class SignalConfig:
     decision_interval: int = 5        # s between decisions after min green
     control: str = 'stages'           # 'stages' (pick the next stage) | 'plan' (adjust a
                                       # coordinated plan: FOLLOW / HOLD / EARLY, step 2F)
-                                      # | 'select' (pick the junction's controller, step 2G)
                                       # | 'hierarchy' (a manager picks the experts, 2H)
     max_extension: int = 20           # s, plan control: longest green extension past the plan
     hold_guard: bool = False          # plan control (and plan experts under 'hierarchy'):
                                       # extend only if the next stage keeps its
                                       # minimum green; catch up without skipping stages
-    select_interval: int = 90         # s, 'select' control: time between controller choices
-    experts: list[str] = field(       # 'select' / 'hierarchy': controllers to choose from
+    experts: list[str] = field(       # 'hierarchy': controllers to choose from
         default_factory=lambda: ['greenwave', 'coord_actuated', 'maxpressure'])
     actuated_loops: str = 'stopline'  # 'actuated' expert / actuated_py: 'stopline' (2G) or
                                       # 'upstream' (where SUMO's actuated control has them)
@@ -75,11 +73,27 @@ class HierarchyConfig:
     group_range: float = 400.0        # m, scope 'group': signals this close form a group
     interval: int = 300               # s between manager decisions
     manager: str = 'learned'          # 'learned' (DQN) | 'fixed' (always fixed_expert)
+                                      # | 'table' (best expert for the measured demand)
+    table_levels: list[float] = field(default_factory=list)   # 'table': demand grid (empty:
+                                      # 9 levels from train.level_min to level_max)
+    table_scenarios: int = 3          # 'table': scenarios per level and expert
+    hysteresis: int = 2               # 'table': decisions in a row before a switch
     fixed_expert: int = 0             # index into [signals] experts
     worker: str = 'off'               # 'off': junctions run the chosen expert unmodified;
                                       # 'residual': per-junction RL fine-tunes it
     reward: str = 'queue'             # manager reward (reward.KINDS), mean over the group
     reward_scale: float = 1.0
+    default_expert: str = ''          # learned manager: '' (none) | an expert's name | 'auto'
+                                      # (the best single expert on the validation scenarios,
+                                      # measured before training).  The manager runs it
+                                      # unless another expert's Q-value is higher by
+                                      # `margin`·|Q(default)|, and a run whose manager never
+                                      # beats it on validation deploys it (best checkpoint)
+    margin: float = 0.05
+    accept_scenarios: int = 0         # with a default expert: after training, the best
+                                      # checkpoint must beat the default on this many fresh
+                                      # scenarios per validation level (paired, one-sided
+                                      # Wilcoxon p < 0.05), else the run deploys the default
     gamma: float = 0.8
     lr: float = 1e-3
     tau: float = 0.01
@@ -176,10 +190,17 @@ class Config:
 # Loading / saving
 # ----------------------------------------------------------------------
 
+# Keys of removed features: still in the config.toml of earlier runs, dropped when loading.
+RETIRED = {
+    'signals': {'select_interval'},     # RL controller selection (2G), removed
+}
+
+
 def _build(cls, data, where):
     if not isinstance(data, dict):
         raise ValueError(f'[{where}] must be a table, got {data!r}')
     fields = {f.name: f for f in dataclasses.fields(cls)}
+    data = {k: v for k, v in data.items() if k not in RETIRED.get(where, ())}
     unknown = set(data) - set(fields)
     if unknown:
         raise ValueError(f'Unknown key(s) in [{where or "top level"}]: {sorted(unknown)}')

@@ -200,3 +200,151 @@ def test_both_levels_learn(corridor, work_root):
     with open(os.path.join(out, 'train_log.csv')) as f:
         header = f.readline()
     assert 'mgr_actuated' in header and 'wrk_hold' in header
+
+
+class Q:
+    """Stand-in manager network with fixed Q-values."""
+
+    def __init__(self, q):
+        self.q = np.array(q, dtype=float)
+
+    def q_values(self, state):
+        return self.q.copy()
+
+    def act(self, state, mask, epsilon=0.0):
+        return int(np.argmax(self.q))
+
+
+@pytest.mark.parametrize('q, expected', [([-10.0, -9.8], 0),     # better by 2 % < margin
+                                         ([-10.0, -9.0], 1),     # better by 10 %
+                                         ([-10.0, -11.0], 0)])
+def test_default_expert_margin(corridor, q, expected):
+    from tsc.controllers.hierarchy import Manager, make_groups
+    m = Manager(corridor, make_groups(corridor, 'network', 400.0), 2, agent=Q(q))
+    m.default, m.margin = 0, 0.05
+    assert m._act(None, np.ones(2, dtype=bool)) == expected
+    m.default = None                                  # no default: plain argmax
+    assert m._act(None, np.ones(2, dtype=bool)) == int(np.argmax(q))
+
+
+@pytest.mark.sumo
+def test_delay_reward(corridor, work_root):
+    """'delay' is minus the time lost per lane: zero on empty roads, below 'queue' as it
+    also counts slow (not only halting) vehicles."""
+    from tsc.demand import generate_routes
+    from tsc.reward import Reward
+    from tsc.simulation import Simulation
+    demand = DemandConfig(generator='od', profile='flat', duration=200, tidal_share=0.7)
+    route = generate_routes(corridor, demand, os.path.join(work_root, 'delay.rou.xml'), 6, 3000)
+    sim = Simulation(corridor, route, 200, os.path.join(work_root, 'smoke', 'delay'), seed=1).start()
+    delay, queue = Reward(corridor, 'delay'), Reward(corridor, 'queue')
+    assert all(r == 0.0 for r in delay.all(sim).values())
+    lower = 0
+    while not sim.done:
+        sim.step()
+        d, q = delay.all(sim), queue.all(sim)
+        assert all(d[t] <= 0.0 for t in d)
+        lower += sum(d[t] < q[t] for t in d)
+    sim.close()
+    assert lower > 0
+
+
+@pytest.mark.sumo
+def test_default_expert_fallback(corridor, work_root):
+    """default_expert = 'auto': every expert is validated alone before training, the best
+    one is the default and the first 'best' checkpoint, which loads as that expert alone."""
+    import json
+    from tsc import config as config_mod
+    from tsc.experiments.runs import load_policy
+    from tsc.experiments.train import train_one
+    cfg = hierarchy_cfg(interval=60, hidden=[8], updates=2, batch_size=4,
+                        default_expert='auto', reward='delay')
+    cfg = config_mod.replace(cfg, name='hier_default', output_dir=os.path.join(work_root, 'out'),
+                             network={'path': CORRIDOR},
+                             demand={'generator': 'od', 'duration': 300, 'tidal_share': 0.7},
+                             train={'seeds': [0], 'episodes': 1, 'val_every': 5,
+                                    'val_levels': [2500.0], 'level_min': 2500.0,
+                                    'level_max': 2500.0})
+    out = os.path.join(work_root, 'out', 'hier_default')
+    best = os.path.join(out, 'best_hierarchy.json')
+    if os.path.exists(best):
+        os.remove(best)
+    train_one(cfg, out)                    # validates once more at the last episode
+    with open(os.path.join(out, 'experts_val.json')) as f:
+        experts = json.load(f)
+    vals = experts['val_delay']
+    assert set(vals) == {'maxpressure', 'actuated'}
+    assert experts['default'] == min(vals, key=vals.get)
+    with open(best) as f:
+        meta = json.load(f)
+    assert meta['default'] == experts['default']
+    policy, _ = load_policy(out, corridor, 'best')
+    m = policy.actions.manager
+    assert policy.actions.names[m.default] == experts['default']
+    if meta['forced'] is not None:         # the learned manager did not beat the default
+        assert meta['forced'] == experts['default'] and policy.actions.force_agree
+
+    # acceptance on fresh scenarios: the deployed policy is recorded and loads as such
+    from tsc.experiments.train import accept
+    result = accept(out, per_level=2)
+    assert result['default'] == experts['default'] and result['scenarios'] == 2
+    with open(os.path.join(out, 'accept.json')) as f:
+        assert json.load(f) == result
+    policy, _ = load_policy(out, corridor, 'best')
+    forced = policy.actions.manager.forced
+    if result['deployed'] == 'learned':
+        assert forced is None and result['p'] < 0.05 and result['change'] < 0
+    else:
+        assert policy.actions.names[forced] == experts['default']
+
+
+def test_table_look_up_and_hysteresis(corridor):
+    from tsc.controllers.hierarchy import Manager, make_groups
+    m = Manager(corridor, make_groups(corridor, 'network', 400.0), 3, policy='table')
+    m.table = [((0.1, 0.0), 0), ((0.3, 0.1), 1), ((0.35, 0.6), 2)]
+    m.hysteresis = 2
+    m.choice, m.candidate, m.streak, m.flows = [0], None, 0, [None]
+    m._look_up((0.29, 0.12))
+    assert m.choice == [1]                       # first measured decision: switch at once
+    m._look_up((0.34, 0.55))
+    assert m.choice == [1]                       # past saturation: jam picks expert 2 ...
+    m._look_up((0.36, 0.65))
+    assert m.choice == [2]                       # ... after two decisions in a row
+    m._look_up((0.09, 0.01))
+    m._look_up((0.36, 0.65))
+    assert m.choice == [2]                       # a one-off reading does not switch
+
+    # keys per interval: the k-th reading is compared with the levels' k-th readings
+    m.table = [([(0.05, 0.0), (0.1, 0.0)], 0), ([(0.1, 0.0), (0.3, 0.1)], 1)]
+    m.choice, m.candidate, m.streak, m.flows = [1], None, 0, [None]
+    m._look_up((0.1, 0.0))
+    assert m.choice == [1]                       # 1st reading: like level 1 filling up
+    m.choice, m.candidate, m.streak, m.flows = [1], None, 0, [None, None, None]
+    m._look_up((0.1, 0.0))
+    assert m.choice == [0]                       # later (last key reused): like level 0
+
+
+@pytest.mark.sumo
+def test_table_manager(corridor, work_root):
+    """manager = 'table': every expert at every level, the best one per level, saved with
+    the run and loaded as the policy."""
+    import pandas as pd
+    from tsc import config as config_mod
+    from tsc.experiments.runs import load_policy
+    from tsc.experiments.train import train_one
+    cfg = hierarchy_cfg(manager='table', interval=60, table_levels=[1000.0, 3500.0],
+                        table_scenarios=1)
+    cfg = config_mod.replace(cfg, name='hier_table', output_dir=os.path.join(work_root, 'out'),
+                             workers=1, network={'path': CORRIDOR},
+                             demand={'generator': 'od', 'duration': 300, 'tidal_share': 0.7},
+                             train={'seeds': [0]})
+    out = os.path.join(work_root, 'out', 'hier_table')
+    train_one(cfg, out)
+    df = pd.read_csv(os.path.join(out, 'table.csv'))
+    assert len(df) == 2 * 2 and set(df.expert) == {'maxpressure', 'actuated'}
+    best = df.loc[df.groupby('level').delay.idxmin()].set_index('level').expert
+    policy, _ = load_policy(out, corridor, 'best')
+    table = policy.actions.manager.table
+    assert [policy.actions.names[e] for _, e in table] == list(best)
+    assert table[0][0][:, 0].mean() < table[1][0][:, 0].mean()   # more demand, more flow
+    assert len(table[0][0]) == 300 // 60         # one key per interval

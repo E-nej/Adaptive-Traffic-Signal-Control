@@ -1,0 +1,50 @@
+# Step 2H: corridor, one expert for all 7 signals
+# Step 2H v3c: lookup manager, experts exactly as their baselines (no max-red shield, no hold guard), keys per interval, 10 scenarios per level. Every expert runs alone at a grid of demand levels; the
+# manager picks the best one for the flow and jam it measures (no DQN, no workers).
+#   tsc train configs/hierarchy/v3c/corridor_network.toml --seeds 0
+name = "hier3c_corridor_network"
+workers = 14
+
+[network]
+path = "networks/corridor/corridor.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.6
+tidal_share = 0.7
+tidal_random = true
+
+[signals]
+control = "hierarchy"
+decision_interval = 5    # workers decide every 5 s of green; the expert acts every second
+max_extension = 20
+experts = ["greenwave", "coord_actuated", "maxpressure", "actuated"]
+actuated_loops = "sumo"
+
+[hierarchy]
+scope = "network"
+interval = 300
+worker = "off"
+manager = "table"
+table_scenarios = 10
+hysteresis = 2
+
+[observation]
+mode = "detector"
+comm = true
+message = "directional"
+noise = 0.05
+dropout = 0.02
+
+[reward]                 # junction agents only: unused with workers off
+kind = "multi"
+neighbour_weight = 0.5
+
+[agent]                  # junction agents only: unused with workers off
+shared = true
+
+[train]
+level_min = 1000.0
+level_max = 5000.0
+val_levels = [1500.0, 3000.0, 4500.0]
+plan_match = 0.5

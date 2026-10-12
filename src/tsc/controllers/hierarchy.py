@@ -16,7 +16,7 @@ group's current expert, its share of the signals), so a manager trained on one
 network can run on another.  Its reward is minus the mean queue per lane in the group
 over the interval.
 
-Bottom level: the junctions of a group run the chosen expert (SelectorActions, so a
+Bottom level: the junctions of a group run the chosen expert (ExpertPool, so a
 change of expert is safe: SignalHead intergreens, a plan expert rejoins the plan).
 worker = 'off' runs the experts unmodified; worker = 'residual' adds a per-junction agent
 that fine-tunes the active expert (HierarchyActions).  Both levels train in the same run.
@@ -25,7 +25,7 @@ that fine-tunes the active expert (HierarchyActions).  Both levels train in the 
 import numpy as np
 
 from tsc.controllers.plan import EARLY, FOLLOW, HOLD, PlanActions
-from tsc.controllers.select import SelectorActions
+from tsc.controllers.select import ExpertPool
 from tsc.detectors import e1_id, e2_capacity, e2_id
 
 SCOPES = ('network', 'group', 'junction')
@@ -106,12 +106,22 @@ class Manager:
     policy = 'learned' : DQN over the group features (shared by all groups)
     policy = 'fixed'   : always expert `fixed_expert` (a uniform-expert baseline that runs
                          through exactly the same machinery)
+    policy = 'table'   : the expert that was best at the demand level whose network flow
+                         and jam ratio are nearest to those measured over the last interval
+                         (jam tells levels apart past saturation, where flow stops rising).
+                         `table`: [(keys, expert)], keys = [(flow, jam)] per interval of the
+                         episode, so the k-th reading is compared with the levels' k-th
+                         readings (the network fills up from empty, the demand profile
+                         varies within the hour); built by running every expert at a grid
+                         of levels (experiments.train.build_table).  Same expert for every
+                         group; a change needs `hysteresis` decisions in a row, except at
+                         the first decision with a measured flow.
     """
 
     def __init__(self, network, groups, n_experts, interval=300, policy='learned',
                  fixed_expert=0, reward='queue', reward_scale=1.0, agent=None, updates=20,
                  e2_length=50.0):
-        if policy not in ('learned', 'fixed'):
+        if policy not in ('learned', 'fixed', 'table'):
             raise ValueError(f'Unknown manager policy {policy!r}')
         self.network = network
         self.groups = groups
@@ -129,15 +139,28 @@ class Manager:
         self.dim = 2 * GROUP_FEATS + n_experts + 1
         self.learning = False
         self.epsilon = 0.0
+        self.default = None     # expert run unless another one is better by `margin`
+        self.margin = 0.0
+        self.forced = None      # expert run everywhere, whatever the Q-values (fallback)
+        self.table = []         # policy 'table': [([(flow, jam) per interval], expert)]
+        self.hysteresis = 2
 
     def reset(self, sim):
         self.sensor.reset()
         self.reward_fn.reset()
         self.acc = np.zeros(len(self.groups))
         self.acc_n = 0
-        self.choice = [self.fixed_expert if self.policy == 'fixed' else 0] * len(self.groups)
+        if self.forced is not None:
+            first = self.forced
+        elif self.policy == 'fixed':
+            first = self.fixed_expert
+        else:
+            first = self.default if self.default is not None else 0
+        self.choice = [first] * len(self.groups)
         self.pending = None
         self.counts = np.zeros(self.n_experts)
+        self.flows = []                 # network (flow, jam) of every interval (table building)
+        self.candidate, self.streak = None, 0
         self._decide()
 
     def tick(self, sim):
@@ -159,8 +182,19 @@ class Manager:
         return out
 
     def _decide(self):
+        measured = self.acc_n > 0               # not the decision at t = 0
         states = self.states()
-        if self.policy == 'learned':
+        net = states[0][GROUP_FEATS:2 * GROUP_FEATS]    # network row: [jam, .., flow, ..]
+        flow = (float(net[3]), float(net[0]))
+        if measured:
+            self.flows.append(flow)
+        if self.forced is not None:
+            self.choice = [self.forced] * len(self.groups)
+            self.pending = None
+        elif self.policy == 'table':
+            if measured:
+                self._look_up(flow)
+        elif self.policy == 'learned':
             mask = np.ones(self.n_experts, dtype=bool)
             if self.learning and self.pending is not None:
                 rewards = self.reward_scale * self.acc / max(1, self.acc_n)
@@ -168,12 +202,36 @@ class Manager:
                     self.agent.store(s, a, float(r), s2, mask)
                 for _ in range(self.updates):
                     self.agent.replay()
-            self.choice = [self.agent.act(s, mask, self.epsilon) for s in states]
+            self.choice = [self._act(s, mask) for s in states]
             self.pending = list(zip(states, self.choice))
         self.acc[:] = 0.0
         self.acc_n = 0
         for g, c in zip(self.groups, self.choice):
             self.counts[c] += len(g)
+
+    def _look_up(self, flow):
+        i = len(self.flows) - 1                   # this reading's index in the episode
+        keys = [np.atleast_2d(k) for k, _ in self.table]    # one (flow, jam): every interval
+        keys = np.array([k[min(i, len(k) - 1)] for k in keys])
+        scale = np.maximum(keys.max(axis=0) - keys.min(axis=0), 1e-6)
+        dist = np.abs((keys - np.asarray(flow)) / scale).sum(axis=1)
+        expert = self.table[int(np.argmin(dist))][1]
+        first = self.candidate is None
+        self.streak = self.streak + 1 if expert == self.candidate else 1
+        self.candidate = expert
+        if first or self.streak >= self.hysteresis:
+            self.choice = [expert] * len(self.groups)
+
+    def _act(self, state, mask):
+        """Epsilon-greedy; with a default expert the greedy choice leaves the default only
+        if its Q-value is higher by margin·|Q(default)| (switching has costs Q misses)."""
+        if self.default is None:
+            return self.agent.act(state, mask, self.epsilon)
+        if self.epsilon and np.random.random() < self.epsilon:
+            return self.agent.act(state, mask, 1.0)
+        q = self.agent.q_values(state)
+        best, d = int(np.argmax(q)), self.default
+        return best if q[best] - q[d] > self.margin * abs(q[d]) else d
 
     def expert_of(self):
         """{tl_id: expert index} of the current choice."""
@@ -213,12 +271,11 @@ class HierarchyActions:
         self.has_workers = h.worker == 'residual'
         self.interval = s.decision_interval
         self.max_extension = s.max_extension
-        self.selector = SelectorActions(network, interval=s.decision_interval,
-                                        max_extension=s.max_extension, noise=o.noise,
-                                        dropout=o.dropout, e2_length=o.e2_length, comm=False,
-                                        seed=seed, experts=s.experts,
-                                        actuated_loops=s.actuated_loops,
-                                        hold_guard=s.hold_guard)
+        self.selector = ExpertPool(network, interval=s.decision_interval,
+                                   max_extension=s.max_extension, noise=o.noise,
+                                   dropout=o.dropout, e2_length=o.e2_length, seed=seed,
+                                   experts=s.experts, actuated_loops=s.actuated_loops,
+                                   hold_guard=s.hold_guard)
         self.names = self.selector.names
         self.n_actions = N_WORKER_ACTIONS if self.has_workers else 1
         self.extra_dim = len(self.names) + 2 + PlanActions.extra_dim if self.has_workers else 0
@@ -235,7 +292,46 @@ class HierarchyActions:
                                policy=h.manager, fixed_expert=h.fixed_expert, reward=h.reward,
                                reward_scale=h.reward_scale, agent=agent, updates=h.updates,
                                e2_length=o.e2_length)
+        self.manager.margin = h.margin
+        self.manager.hysteresis = h.hysteresis
+        if h.manager == 'learned' and h.default_expert not in ('', 'auto'):
+            self.set_default(self.names.index(h.default_expert))
         self.group_of = {t: i for i, g in enumerate(groups) for t in g}
+        self.force_agree = False    # workers always AGREE (single-expert validation, fallback)
+
+    def set_default(self, expert):
+        self.manager.default = expert
+
+    def force(self, expert, agree=True):
+        """Run `expert` everywhere (workers agreeing); None = back to the learned policy."""
+        self.manager.forced = expert
+        self.force_agree = agree and expert is not None
+
+    # saved with the weights: which expert the manager defaults to / is forced to
+    def save_meta(self, run_dir, which):
+        import json
+        import os
+        m = self.manager
+        meta = {'default': None if m.default is None else self.names[m.default],
+                'forced': None if m.forced is None else self.names[m.forced],
+                'agree': self.force_agree,
+                'table': [[np.asarray(k).tolist(), self.names[e]] for k, e in m.table]}
+        with open(os.path.join(run_dir, f'{which}_hierarchy.json'), 'w') as f:
+            json.dump(meta, f)
+
+    def load_meta(self, run_dir, which):
+        import json
+        import os
+        path = os.path.join(run_dir, f'{which}_hierarchy.json')
+        if not os.path.exists(path):        # runs from before the default expert
+            return
+        with open(path) as f:
+            meta = json.load(f)
+        if meta['default'] is not None:
+            self.set_default(self.names.index(meta['default']))
+        self.manager.forced = None if meta['forced'] is None else self.names.index(meta['forced'])
+        self.force_agree = meta['agree']
+        self.manager.table = [(np.asarray(k), self.names.index(n)) for k, n in meta.get('table', [])]
 
     # training hooks ---------------------------------------------------
 
@@ -324,6 +420,8 @@ class HierarchyActions:
         e, p = self.expert(tl_id), self._proposal(sim, tl_id)
         mask = np.zeros(N_WORKER_ACTIONS, dtype=bool)
         mask[AGREE] = True
+        if self.force_agree:
+            return mask
         if e in self.selector.plan_experts:
             plan_mask = self.selector.experts[e].actions.mask(sim, tl_id)
             mask[HOLD_W] = plan_mask[HOLD] and p != HOLD
