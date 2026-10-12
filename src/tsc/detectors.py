@@ -2,7 +2,8 @@
 
 Every incoming lane of a signalised junction gets an E2 area detector
 (camera/radar-like) on its last `e2_length` metres and an E1 induction loop
-at the stop line.  Detector ids: `e2_<lane>`, `e1_<lane>`.  A second loop `e1u_<lane>`
+at the stop line.  Detector ids: `e2_<lane>`, `e1_<lane>`.  Optionally a longer area
+detector `e2a_<lane>` over the last `approach_length` metres (approaching vehicles).  A second loop `e1u_<lane>`
 sits where SUMO's actuated control puts its loops (UPSTREAM_GAP s of travel at the
 speed limit before the stop line, at most the lane's start).
 
@@ -20,6 +21,10 @@ UPSTREAM_GAP = 2.0         # s, SUMO's default 'detector-gap' of actuated signal
 
 def e2_id(lane):
     return f'e2_{lane}'
+
+
+def e2a_id(lane):
+    return f'e2a_{lane}'
 
 
 def e1_id(lane):
@@ -68,9 +73,10 @@ def e2_capacity(network, lane, e2_length=50.0):
     return max(1.0, covered / VEH_SPACE)
 
 
-def detector_file(network, e2_length=50.0):
+def detector_file(network, e2_length=50.0, approach_length=0.0):
     """Write (once) and return the additional file with the detectors of `network`."""
-    path = os.path.join(network.work_dir, f'detectors_{int(e2_length)}_v2.add.xml')
+    tag = f'_a{int(approach_length)}' if approach_length else ''
+    path = os.path.join(network.work_dir, f'detectors_{int(e2_length)}{tag}_v2.add.xml')
     if os.path.exists(path):
         return path
     lines = ['<additional>']
@@ -86,6 +92,13 @@ def detector_file(network, e2_length=50.0):
             lines.append(
                 f'    <inductionLoop id="{e1_id(lane)}" lane="{lane}" pos="{max(0.0, length - 1.0):.2f}" '
                 f'freq="3600" file="NUL"/>')
+            if approach_length:
+                a_lanes, a_start, _ = e2_span(network, lane, approach_length)
+                a_where = (f'lane="{lane}"' if len(a_lanes) == 1
+                           else f'lanes="{" ".join(a_lanes)}"')
+                lines.append(
+                    f'    <laneAreaDetector id="{e2a_id(lane)}" {a_where} pos="{a_start:.2f}" '
+                    f'endPos="{length:.2f}" freq="3600" file="NUL"/>')
             upstream = max(0.0, length - UPSTREAM_GAP * network.lane_speed[lane])
             lines.append(
                 f'    <inductionLoop id="{e1u_id(lane)}" lane="{lane}" pos="{upstream:.2f}" '

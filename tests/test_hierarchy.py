@@ -441,3 +441,24 @@ def test_advanced_maxpressure_rule(corridor):
     sim.api = api({queued: 6}, near=10)
     assert amp.act(sim, tl) != 0
     assert length > 0 and lane_edge(queued)
+
+
+@pytest.mark.sumo
+def test_approach_detectors_run(corridor, work_root):
+    """SUMO accepts the approach detectors (multi-lane spans included) and they see traffic."""
+    from tsc.demand import generate_routes
+    from tsc.detectors import e2a_id
+    from tsc.observation import Observer
+    from tsc.simulation import Simulation
+    demand = DemandConfig(generator='od', profile='flat', duration=200, tidal_share=0.7)
+    route = generate_routes(corridor, demand, os.path.join(work_root, 'appr.rou.xml'), 7, 3000)
+    sim = Simulation(corridor, route, 200, os.path.join(work_root, 'smoke', 'appr'), seed=1,
+                     approach_length=150.0).start()
+    obs = Observer(corridor, mode='detector', comm=False, approach_length=150.0)
+    seen = 0
+    while not sim.done:
+        sim.step()
+        seen += sum(sim.api.lanearea.getLastStepVehicleNumber(e2a_id(l))
+                    for t in corridor.tl_ids for l in corridor.in_lanes[t])
+    assert seen > 0 and obs.observe(sim, corridor.tl_ids[0]).shape == (obs.dim,)
+    sim.close()

@@ -27,7 +27,8 @@ def sim_kwargs(cfg):
     interval = 1 if cfg.signals.control in PLAN_CONTROLS else cfg.signals.decision_interval
     return dict(decision_interval=interval, max_green=cfg.signals.max_green,
                 max_red=cfg.signals.max_red, e2_length=cfg.observation.e2_length,
-                begin=cfg.demand.begin, undeparted=cfg.demand.count_undeparted)
+                begin=cfg.demand.begin, undeparted=cfg.demand.count_undeparted,
+                approach_length=cfg.observation.approach_length)
 
 
 def save_run_info(cfg, out_dir):

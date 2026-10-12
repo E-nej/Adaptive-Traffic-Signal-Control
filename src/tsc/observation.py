@@ -5,7 +5,9 @@ mode='grid'     : vehicle-position grid per incoming lane (perfect information,
 mode='detector' : only what roadside detectors measure: per incoming lane an
                   E2 area detector on the last 50 m (jam length, occupancy, mean
                   speed) and an E1 loop at the stop line (vehicles passed since
-                  the last decision), optionally with noise and detector failures
+                  the last decision), optionally with noise and detector failures;
+                  with approach_length > 0 also the vehicles moving toward the stop
+                  line within approach_length m (a second, longer area detector)
 
 Normalisation uses fixed physical constants (lane capacity, speed limit),
 never the number of vehicles in the episode (fixes F5).
@@ -26,7 +28,7 @@ queues are lane halting counts.
 
 import numpy as np
 
-from tsc.detectors import e1_id, e2_capacity, e2_id
+from tsc.detectors import e1_id, e2_capacity, e2_id, e2a_id
 
 VEH_SPACE = 7.5            # m per queued vehicle (length + gap)
 CELL_BOUNDS = [7, 14, 21, 28, 40, 55, 70, 90, 110]   # m from the stop line → 10 cells
@@ -57,7 +59,7 @@ class Observer:
     MESSAGE_MODES = ('real', 'zero', 'wrong')
 
     def __init__(self, network, mode='grid', comm=True, noise=0.0, dropout=0.0, seed=0,
-                 e2_length=50.0, message='aggregate'):
+                 e2_length=50.0, message='aggregate', approach_length=0.0):
         if mode not in ('grid', 'detector'):
             raise ValueError(mode)
         if message not in MESSAGE_FORMATS:
@@ -73,7 +75,12 @@ class Observer:
         self.cap = {l: max(1.0, network.lane_length[l] / VEH_SPACE) for l in network.lane_length}
         self.e2_cap = {l: e2_capacity(network, l, e2_length)
                        for tl_id in network.tl_ids for l in network.in_lanes[tl_id]}
-        per_lane = N_CELLS + 1 if mode == 'grid' else DET_FEATS
+        self.approach = mode == 'detector' and approach_length > 0
+        self.det_feats = DET_FEATS + (1 if self.approach else 0)
+        if self.approach:
+            self.a_cap = {l: e2_capacity(network, l, approach_length)
+                          for tl_id in network.tl_ids for l in network.in_lanes[tl_id]}
+        per_lane = N_CELLS + 1 if mode == 'grid' else self.det_feats
         self.local_dim = network.max_in_lanes * per_lane + network.max_greens + 1
         self.dim = self.local_dim + (network.max_neighbours * self.msg_size if comm else 0)
         self.passed = {l: 0 for tl_id in network.tl_ids for l in network.in_lanes[tl_id]}
@@ -119,7 +126,7 @@ class Observer:
         """[jam ratio, occupancy, speed ratio, passed] for one lane, with noise / failure."""
         if self.dropout and self.rng.random() < self.dropout:
             self.passed[lane] = 0
-            return np.zeros(DET_FEATS)          # failed detector reports nothing
+            return np.zeros(self.det_feats)     # failed detector reports nothing
         api = sim.api
         det = e2_id(lane)
         jam = api.lanearea.getJamLengthVehicle(det) / self.e2_cap[lane]
@@ -128,14 +135,20 @@ class Observer:
         speed = 1.0 if speed < 0 else min(1.0, speed / self.network.lane_speed[lane])
         passed = self.passed[lane] / PASSED_NORM
         self.passed[lane] = 0
-        feats = np.array([jam, occ, speed, passed])
+        feats = [jam, occ, speed, passed]
+        if self.approach:                       # vehicles still moving toward the stop line
+            a = e2a_id(lane)
+            moving = (api.lanearea.getLastStepVehicleNumber(a)
+                      - api.lanearea.getJamLengthVehicle(a))
+            feats.append(max(0.0, moving) / self.a_cap[lane])
+        feats = np.array(feats)
         if self.noise:
-            feats = np.clip(feats + self.rng.normal(0.0, self.noise, DET_FEATS), 0.0, None)
+            feats = np.clip(feats + self.rng.normal(0.0, self.noise, len(feats)), 0.0, None)
         return feats
 
     def local(self, sim, tl_id):
         if self.mode == 'detector':
-            lane_feats = np.zeros((self.network.max_in_lanes, DET_FEATS))
+            lane_feats = np.zeros((self.network.max_in_lanes, self.det_feats))
             for i, lane in enumerate(self.network.in_lanes[tl_id]):
                 lane_feats[i] = self._lane_detectors(sim, lane)
             return np.concatenate([lane_feats.ravel(), self._phase_feats(sim, tl_id)])
