@@ -131,9 +131,10 @@ class ObservationConfig:
 
 @dataclass
 class RewardConfig:
-    kind: str = 'multi'               # 'wait' | 'multi' | 'queue' | 'det_queue'
+    kind: str = 'multi'               # see reward.KINDS
     neighbour_weight: float = 0.0     # α: r_i + α·Σ r_neighbours (cooperative reward)
     scale: float = 1.0                # rewards are multiplied by this before learning
+    pressure_weight: float = 0.25     # kind 'queue_pressure': weight of |pressure|
 
 
 @dataclass
@@ -152,6 +153,8 @@ class AgentConfig:
     smdp: bool = False                # time-based discounting: the reward is the discounted
                                       # sum over the decision's seconds, the next value is
                                       # discounted by gamma ** seconds (gamma per second)
+    dueling: bool = False             # dueling head: V(s) + A(s, a) - mean A
+    n_step: int = 1                   # n-step returns (decisions per stored transition)
 
 
 @dataclass

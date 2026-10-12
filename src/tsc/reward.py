@@ -2,7 +2,7 @@
 
 from tsc.detectors import e2_id
 
-KINDS = ('wait', 'multi', 'queue', 'det_queue', 'delay')
+KINDS = ('wait', 'multi', 'queue', 'det_queue', 'delay', 'queue_pressure')
 
 
 class Reward:
@@ -18,17 +18,21 @@ class Reward:
     kind='delay' : -time lost on the approaches this second, Σ n·(1 - v̄/v_max) per lane
                    (the delay the evaluation measures: it also counts slowing down, which
                    'queue' and 'wait' miss, e.g. the stops a green wave saves)
+    kind='queue_pressure' : 'queue' - pressure_weight·|halting on the controlled lanes -
+                   halting on the exit lanes| (pressure: helps near saturation, when
+                   releasing a queue into a full exit only moves it)
     All are divided by the number of incoming lanes.  Ground-truth rewards cover the whole
     approach: the controlled lanes plus the edge chain before them (network.approach_edges,
     e.g. the road before a left-turn bay).
     """
 
-    def __init__(self, network, kind, neighbour_weight=0.0):
+    def __init__(self, network, kind, neighbour_weight=0.0, pressure_weight=0.25):
         if kind not in KINDS:
             raise ValueError(f'Unknown reward {kind!r}; choose from {KINDS}')
         self.network = network
         self.kind = kind
         self.neighbour_weight = neighbour_weight
+        self.pressure_weight = pressure_weight
         self.prev_wait = {tl_id: 0.0 for tl_id in network.tl_ids}
         self.v_max = {}                   # lane -> speed limit (kind 'delay')
 
@@ -62,6 +66,11 @@ class Reward:
                    + sum(api.edge.getLastStepHaltingNumber(e) for e in chain))
         if self.kind == 'queue':
             r = -halting
+        elif self.kind == 'queue_pressure':
+            inside = sum(api.lane.getLastStepHaltingNumber(l) for l in lanes)
+            out = sum(api.lane.getLastStepHaltingNumber(l)
+                      for l in self.network.out_lanes[tl_id])
+            r = -halting - self.pressure_weight * abs(inside - out)
         else:
             wait = (sum(api.lane.getWaitingTime(l) for l in lanes)
                     + sum(api.edge.getWaitingTime(e) for e in chain))
