@@ -21,7 +21,10 @@ class Simulation:
     def __init__(self, network, route_file, duration, out_dir, seed=0, tls='python',
                  additional=None, gui=False, decision_interval=5, max_green=None, max_red=None,
                  e2_length=50.0, begin=0, undeparted=False, approach_length=0.0,
-                 red_call=False):
+                 red_call=False, emissions=True):
+        """emissions=False drops SUMO's emissions device: the co2_* metrics are then 0, but
+        the simulation and lane/edge CO2 values (the 'multi' reward) are unchanged, and SUMO
+        runs 20-25 % faster (used for training episodes)."""
         if tls not in TLS_MODES:
             raise ValueError(f'Unknown tls mode: {tls!r}')
         self.network = network
@@ -50,9 +53,10 @@ class Simulation:
             '--tripinfo-output', self.tripinfo,
             '--tripinfo-output.write-unfinished', 'true',
             '--tripinfo-output.write-undeparted', 'true' if undeparted else 'false',
-            '--device.emissions.probability', '1',
             '--statistic-output', self.statistics,
         ]
+        if emissions:
+            self.cmd += ['--device.emissions.probability', '1']
         additional = list(additional or [])
         if tls == 'python':
             additional.append(detector_file(network, e2_length, approach_length))

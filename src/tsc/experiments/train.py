@@ -96,7 +96,8 @@ def scenario_delays(network, cfg, controller, work_dir, library=None, per_level=
             if plans is not None:
                 controller.set_plans(plans)
             m = run_episode(network, controller, route, cfg.demand.duration,
-                            os.path.join(work_dir, 'val'), seed=seed, **sim_kwargs(cfg))
+                            os.path.join(work_dir, 'val'), seed=seed, emissions=False,
+                            **sim_kwargs(cfg))
             delays.append(m['delay'])
     return delays
 
@@ -381,7 +382,7 @@ def train_one(cfg, out_dir, on_episode_end=None):
             greedy.set_plans(library[key])
 
         sim = Simulation(network, route, cfg.demand.duration, os.path.join(work_dir, 'episode'),
-                         seed=route_seed, **sim_kwargs(cfg)).start()
+                         seed=route_seed, emissions=False, **sim_kwargs(cfg)).start()
         reward_fn.reset()
         greedy.reset(sim)
         pending = {}
