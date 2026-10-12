@@ -64,7 +64,7 @@ def make_actions(network, observer, cfg):
         return SelectorActions(network, select_interval=s.select_interval,
                                interval=s.decision_interval, max_extension=s.max_extension,
                                noise=o.noise, dropout=o.dropout, e2_length=o.e2_length,
-                               comm=o.comm, seed=cfg.train.seeds[0])
+                               comm=o.comm, seed=cfg.train.seeds[0], experts=s.experts)
     if s.control == 'stages':
         return StageActions(network, observer)
     raise ValueError(f'Unknown control mode {s.control!r}')

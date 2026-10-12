@@ -20,6 +20,7 @@ select_interval = 90
 decision_interval = 5
 max_extension = 20
 max_red = 150
+experts = ["greenwave", "coord_actuated", "maxpressure", "actuated"]   # + isolated actuated (best at high demand)
 
 [observation]
 mode = "detector"

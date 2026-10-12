@@ -56,6 +56,8 @@ class SignalConfig:
                                       # | 'select' (pick the junction's controller, step 2G)
     max_extension: int = 20           # s, plan control: longest green extension past the plan
     select_interval: int = 90         # s, 'select' control: time between controller choices
+    experts: list[str] = field(       # 'select' control: controllers to choose from
+        default_factory=lambda: ['greenwave', 'coord_actuated', 'maxpressure'])
     max_green: int | None = None      # s, safety shield (None = off)
     max_red: int | None = None        # s, safety shield (None = off)
 
