@@ -137,10 +137,14 @@ class Network:
     def _build_net(self, out_file, tls_type):
         if os.path.exists(out_file):
             return
-        # parallel runs may build it at the same time: write to a temp file, then rename
-        tmp = f'{out_file}.{os.getpid()}.tmp.net.xml'
-        sumo_env.run(['netconvert', '-s', self.src_net, '-o', tmp, *self._netconvert_args(tls_type)])
-        os.replace(tmp, out_file)
+        # parallel runs (also separate commands) may need it at the same time: one builds it
+        with sumo_env.file_lock(f'{out_file}.lock'):
+            if os.path.exists(out_file):
+                return
+            tmp = f'{out_file}.{os.getpid()}.tmp.net.xml'
+            sumo_env.run(['netconvert', '-s', self.src_net, '-o', tmp,
+                          *self._netconvert_args(tls_type)])
+            os.replace(tmp, out_file)
 
     def _green_stages(self, tl_id):
         """Signal states of the green stages (no yellow, at least one green)."""

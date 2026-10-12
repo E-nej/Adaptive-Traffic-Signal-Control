@@ -24,8 +24,8 @@ from tsc import plans as plans_mod
 from tsc.controllers import BASELINES, PLAN_BASELINES, SECOND_BASELINES, baseline
 from tsc.controllers.webster import green_wave_programs, webster_programs
 from tsc.demand import generate_routes, is_directional, scenario_flip
-from tsc.experiments.common import (PLAN_CONTROLS, network_for, run_parallel, save_run_info,
-                                    sim_kwargs)
+from tsc.experiments.common import (PLAN_CONTROLS, file_lock, network_for, run_parallel,
+                                    save_run_info, sim_kwargs)
 from tsc.experiments.runs import is_run_dir, load_policy, load_run_config
 from tsc.simulation import run_episode
 
@@ -51,6 +51,13 @@ def prepare(network, cfg, work, plan_names=()):
     fixed-time baselines and for `plan_names` (e.g. 'greenwave' for plan-controlled runs),
     at every evaluation level and at evaluate.plan_level.
     """
+    # parallel jobs (several `tsc` commands on one network) share these files: one builds
+    # them, the others wait and reuse them
+    with file_lock(os.path.join(work, 'routes', '.prepare.lock')):
+        return _prepare(network, cfg, work, plan_names)
+
+
+def _prepare(network, cfg, work, plan_names):
     ec = cfg.evaluate
     os.makedirs(os.path.join(work, 'routes'), exist_ok=True)
     directions = [False, True] if is_directional(cfg.demand) else [None]
@@ -79,7 +86,7 @@ def prepare(network, cfg, work, plan_names=()):
                     continue
                 path = os.path.join(work, 'routes',
                                     f'{name}_L{int(level)}{"_" + tag if tag else ""}.add.xml')
-                # built once (plans are deterministic); parallel training jobs share them
+                # built once (plans are deterministic); parallel jobs share them
                 plans[level][flip][name] = path if os.path.exists(path) else build(network, calib, path)
     return plans
 

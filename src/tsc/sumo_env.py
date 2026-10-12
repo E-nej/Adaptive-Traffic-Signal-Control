@@ -11,9 +11,11 @@ SUMO_HOME   : use this SUMO installation instead of the pip package
 TSC_TRACI=1 : use TraCI instead of libsumo even without the GUI (slower, for debugging)
 """
 
+import contextlib
 import os
 import subprocess
 import sys
+import time
 
 
 def _setup():
@@ -56,3 +58,32 @@ def api(gui=False):
         return traci
     import libsumo  # type: ignore
     return libsumo
+
+
+@contextlib.contextmanager
+def file_lock(path, stale=3600.0, poll=1.0):
+    """Exclusive lock between processes (also separate `tsc` commands): a lock file created
+    atomically.  Used where jobs build the same shared files (routes, plans).  A lock older
+    than `stale` s is taken to be left by a crashed process and removed."""
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    while True:
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(path) > stale:
+                    os.remove(path)
+                    continue
+            except FileNotFoundError:
+                continue
+            time.sleep(poll)
+    try:
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        yield
+    finally:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
