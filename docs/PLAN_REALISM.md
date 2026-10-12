@@ -312,9 +312,43 @@ Switching is safe (SignalHead intergreens; a plan expert rejoins the plan).
       during training (144 → ~230 s). One cause found: with short stage windows a 20 s extension
       can put a junction two windows behind, and the catch-up then skips a stage (37 skips per
       hour in one run), starving an approach for a full 122 s cycle.
-- [ ] 3.6 Retry with `[signals] hold_guard = true` (extend only if the next stage keeps its
+- [x] 3.6 Retry with `[signals] hold_guard = true` (extend only if the next stage keeps its
       minimum green inside its window; catch up without skipping), with and without the
-      cooperative reward (α = 0.5).
+      cooperative reward (α = 0.5), 3 seeds × 150 episodes. The guard alone does not help
+      (validation 200–230 s). Guard + cooperative reward, delay [s] (best weights):
+
+      | plans     | controller                | 2000 | 4000 | 6000 | 7000 | 8000 |
+      |-----------|---------------------------|------|------|------|------|------|
+      | tuned     | greenwave_py              | 55   | 72   | 91   | 116  | 171  |
+      | tuned     | RL guard + coop           | 58   | 76   | 105  | 142  | 204  |
+      | opposite  | greenwave_py              | 57   | 79   | 119  | 155  | 222  |
+      | opposite  | plan_actuated             | 54   | 77   | 106  | 145  | 213  |
+      | opposite  | RL guard + coop           | 59   | 77   | 103  | 138  | 203  |
+      | –         | actuated (SUMO, isolated) | 50   | 57   | 70   | 93   | 159  |
+
+      With opposite plans the RL is 3–9 % better than the plan at 4000–8000 but **not
+      significantly** (scenario-to-scenario spread ±14–20 %); with tuned plans it is
+      significantly worse (+5 to +21 %). **Plan-based RL does not carry over to Maribor**: in a
+      network of sparse, far-apart signals coordination is worth little, and isolated actuated
+      control beats every plan-based controller by 20–30 % at 6000–8000 veh/h.
+
+## Summary (2026-10-12)
+1. Free stage choice by RL (the paper's setup) cannot match a green wave on an arterial
+   (×3 delay at 4000 veh/h); communication gives it 6–10 %, not the coordination it lacks.
+2. RL that *adjusts* a green-wave plan learns steadily and repairs plans that do not fit the
+   traffic: −10 to −29 % delay vs the plan and −13 to −38 % vs classic coordinated-actuated
+   control on the corridor (opposite-direction plans, significant). With a fitting plan there is
+   nothing to repair (tie).
+3. On top of it, directional neighbour messages help by 4–7 % at 2000–5000 veh/h (final weights,
+   clean comparison) and are used as neighbour-specific information (wrong-neighbour messages
+   +2–7 %, significant) — the first setup in this project where communication does that.
+4. The best controller differs by junction (Maribor: the best fixed assignment mixes all four
+   experts at every level), but learning the choice with DQN failed (corridor and Maribor), and
+   on Maribor a single isolated controller (max-pressure at low, actuated at high demand) beats
+   every mix.
+5. On the real Maribor district, plan-based RL is at best on par with classic coordinated-
+   actuated control. Where RL helps depends on the network: arterials with closely spaced
+   signals and a plan that has gone stale.
 
 ## Later (not now)
 - Real counts (municipality / DRSI counters) → routeSampler, real signal plans.
@@ -368,3 +402,9 @@ uv run tsc diagnose messages configs/step2/evaluate.toml         # do agents use
   (noise breaks its tendency to hold a stage) — worth a look before publishing.
 - 2026-10-11: message diagnostic → communication is used only as a load signal (2E).
   Graphite stack on top of `refactor-v0.2`: `2d-detector-maxpressure`, then the corridor (2E.1).
+- 2026-10-11/12 (overnight): corridor RL sweep (2E.5), plan-based RL (2F, branch
+  `2f-plan-control`), Maribor network and baselines (3, `3a-maribor`), controller selection
+  (2G, `2g-controller-selection`). Bugs found on the way: plan files rebuilt concurrently by
+  parallel jobs (now built once), tlsCycleAdaptation giving zero/too-short greens at low demand
+  (now recomputed), detectors on sub-metre OSM lanes (now multi-lane), a 120 s max-red shield
+  overriding 122 s plan cycles (selector uses 150 s).
