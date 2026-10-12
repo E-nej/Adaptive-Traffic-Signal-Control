@@ -85,9 +85,11 @@ class Observer:
         self.dim = self.local_dim + (network.max_neighbours * self.msg_size if comm else 0)
         self.passed = {l: 0 for tl_id in network.tl_ids for l in network.in_lanes[tl_id]}
         self.released = {l: 0.0 for l in self.passed}
-        # lanes of src whose movements lead to dst (directional messages)
+        # lanes of src whose movements lead to dst (directional messages); toward holds
+        # SUMO link indices, which skip numbers where a link is not modelled
+        in_lane = {(t, i): lane for t in network.tl_ids for i, lane, _ in network.links[t]}
         self.toward_lanes = {
-            (src, dst): sorted({network.links[src][i][1] for i in idx})
+            (src, dst): sorted({in_lane[src, i] for i in idx})
             for (src, dst), idx in network.toward.items()
         }
         self.set_message_mode('real')
