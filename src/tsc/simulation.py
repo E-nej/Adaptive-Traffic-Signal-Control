@@ -73,6 +73,7 @@ class Simulation:
         self.api.start(self.cmd)
         self.t = 0
         self._queue_sum = 0.0
+        self._halting_t = None
         self.heads = {}
         if self.tls == 'python':
             set_state = self.api.trafficlight.setRedYellowGreenState
@@ -101,13 +102,17 @@ class Simulation:
         self.t += 1
         for h in self.heads.values():
             h.tick()
-        net = self.network
-        self._queue_sum += (
-            sum(self.api.lane.getLastStepHaltingNumber(l)
-                for tl_id in net.tl_ids for l in net.in_lanes[tl_id])
-            + sum(self.api.edge.getLastStepHaltingNumber(e)
-                  for tl_id in net.tl_ids for e in net.approach_edges[tl_id])
-        ) / len(net.tl_ids)
+        halting = self.halting()
+        self._queue_sum += sum(halting.values()) / len(halting)
+
+    def halting(self):
+        """{tl_id: approach_halting(...)} of the current second, computed once and shared by
+        the queue metric and the rewards."""
+        if self._halting_t != self.t:
+            self._halting = {tl_id: approach_halting(self.api, self.network, tl_id)
+                             for tl_id in self.network.tl_ids}
+            self._halting_t = self.t
+        return self._halting
 
     @property
     def done(self):
@@ -121,6 +126,13 @@ class Simulation:
                                 mean_queue=self._queue_sum / max(1, self.t))
         out['max_green_overrides'] = forced
         return out
+
+
+def approach_halting(api, network, tl_id):
+    """Halting vehicles on a junction's approach: its incoming lanes plus the edge chain
+    before them (network.approach_edges).  Integer counts, so sums are exact in any order."""
+    return (sum(api.lane.getLastStepHaltingNumber(l) for l in network.in_lanes[tl_id])
+            + sum(api.edge.getLastStepHaltingNumber(e) for e in network.approach_edges[tl_id]))
 
 
 def run_episode(network, controller, route_file, duration, out_dir, seed=0, tls='python',

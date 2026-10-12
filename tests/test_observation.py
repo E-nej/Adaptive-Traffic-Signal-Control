@@ -7,6 +7,7 @@ import pytest
 
 from tsc.observation import DET_FEATS, MSG_SIZE, N_CELLS, Observer
 from tsc.reward import Reward
+from tsc.simulation import approach_halting
 
 
 def fake_sim(network, vehicles=None, halting=0, stage=0, green_time=0):
@@ -32,7 +33,10 @@ def fake_sim(network, vehicles=None, halting=0, stage=0, green_time=0):
         inductionloop=SimpleNamespace(getLastStepVehicleNumber=lambda d: 1),
     )
     heads = {tl: SimpleNamespace(stage=stage, green_time=green_time) for tl in network.tl_ids}
-    return SimpleNamespace(api=api, heads=heads, network=network)
+    sim = SimpleNamespace(api=api, heads=heads, network=network)
+    # like Simulation.halting(), but reading the (possibly patched) fake API on every call
+    sim.halting = lambda: {tl: approach_halting(sim.api, network, tl) for tl in network.tl_ids}
+    return sim
 
 
 def expected_dim(network, mode, comm):

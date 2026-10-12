@@ -62,8 +62,7 @@ class Reward:
             lost = (sum(self._lost(api.lane, l, self._speed(api, l)) for l in lanes)
                     + sum(self._lost(api.edge, e, self._speed(api, f'{e}_0')) for e in chain))
             return -lost / len(lanes)
-        halting = (sum(api.lane.getLastStepHaltingNumber(l) for l in lanes)
-                   + sum(api.edge.getLastStepHaltingNumber(e) for e in chain))
+        halting = sim.halting()[tl_id]          # computed once per second by the simulation
         if self.kind == 'queue':
             r = -halting
         elif self.kind == 'queue_pressure':
