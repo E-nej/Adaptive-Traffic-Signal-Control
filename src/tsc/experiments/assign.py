@@ -4,7 +4,7 @@
 
 For every evaluation level, a greedy search (coordinate descent) over the
 junctions: starting from the green wave everywhere, each junction in turn tries
-every expert of controllers.select.EXPERTS and keeps the one with the lowest
+every expert of [signals] experts and keeps the one with the lowest
 mean delay on the calibration scenarios (never the evaluation scenarios), for
 `passes` rounds.  Like a traffic engineer's time-of-day plan, the result is one
 assignment per demand level: {level: {tl_id: expert index}}.
@@ -20,7 +20,7 @@ import os
 import numpy as np
 
 from tsc import seeds as seeds_mod
-from tsc.controllers.select import EXPERTS, FixedSelection
+from tsc.controllers.select import FixedSelection
 from tsc.demand import is_directional
 from tsc.experiments.common import network_for, run_parallel, save_run_info, sim_kwargs
 from tsc.experiments.evaluate import DIRECTIONS, prepare, route_path
@@ -69,7 +69,7 @@ def make_fixed(network, cfg, assignment):
     s, o = cfg.signals, cfg.observation
     return FixedSelection(network, assignment, default=DEFAULT, interval=s.decision_interval,
                           max_extension=s.max_extension, noise=o.noise, dropout=o.dropout,
-                          e2_length=o.e2_length)
+                          e2_length=o.e2_length, experts=s.experts)
 
 
 def assign(cfg, out_dir=None, workers=None, passes=2):
@@ -102,7 +102,7 @@ def assign(cfg, out_dir=None, workers=None, passes=2):
             cands = []
             for level in levels:
                 current = best[level].get(tl_id, DEFAULT)
-                for k in range(len(EXPERTS)):
+                for k in range(len(cfg.signals.experts)):
                     if k != current:
                         a = dict(best[level])
                         a[tl_id] = k
@@ -116,7 +116,8 @@ def assign(cfg, out_dir=None, workers=None, passes=2):
                     score[level], best[level] = d, a
                     changed = True
             print(f'pass {p} {tl_id}: ' + ', '.join(
-                f'{int(level)}: {EXPERTS[best[level].get(tl_id, DEFAULT)]} {score[level]:.1f}'
+                f'{int(level)}: {cfg.signals.experts[best[level].get(tl_id, DEFAULT)]} '
+                f'{score[level]:.1f}'
                 for level in levels), flush=True)
         if not changed:
             break
