@@ -19,10 +19,11 @@ import time
 import numpy as np
 
 from tsc import config as config_mod
+from tsc import devices
 from tsc import seeds as seeds_mod
 from tsc.demand import generate_routes, is_directional, scenario_flip
 from tsc.experiments.common import (PLAN_CONTROLS, network_for, run_parallel, save_run_info,
-                                    sim_kwargs)
+                                    sim_kwargs, update_run_info)
 from tsc.experiments.runs import make_controller, make_observer
 from tsc.reward import Reward
 from tsc.simulation import Simulation, run_episode
@@ -32,19 +33,31 @@ def default_out(cfg):
     return os.path.join(cfg.output_dir, 'train', cfg.name)
 
 
-def train(cfg, seeds=None, out_root=None, workers=None):
-    """Train one run per seed (in parallel); returns the run directories."""
+def train(cfg, seeds=None, out_root=None, workers=None, gpu_workers=0):
+    """Train one run per seed (in parallel); returns the run directories.
+
+    gpu_workers > 0: the first gpu_workers seeds train on the GPU, the others on the CPU
+    (hybrid scheduling); each run records its device in its config.toml.
+    """
     seeds = list(seeds if seeds is not None else cfg.train.seeds)
     for s in seeds:
         seeds_mod.check_train_seed(s)
+    devices.check(cfg.train.device)
     out_root = out_root or default_out(cfg)
     network = network_for(cfg)  # build the network once before the workers start
     if cfg.signals.control in PLAN_CONTROLS:
         from tsc.experiments.evaluate import plan_library
         plan_library(network, cfg)      # and the plans
-    tasks = [(config_mod.replace(cfg, train={'seeds': [s]}), os.path.join(out_root, f's{s}'))
-             for s in seeds]
-    return list(run_parallel(_train_task, tasks, workers or cfg.workers))
+    tasks = []
+    for i, s in enumerate(seeds):
+        train_cfg = {'seeds': [s]}
+        if gpu_workers:
+            train_cfg['device'] = 'gpu' if i < gpu_workers else 'cpu'
+        tasks.append((config_mod.replace(cfg, train=train_cfg), os.path.join(out_root, f's{s}')))
+    # A process that has initialised TensorFlow cannot change its device: mixed devices
+    # need a fresh process per run.
+    mixed = len({t[0].train.device for t in tasks}) > 1
+    return list(run_parallel(_train_task, tasks, workers or cfg.workers, fresh=mixed))
 
 
 def _train_task(task):
@@ -305,13 +318,17 @@ def train_one(cfg, out_dir, on_episode_end=None):
 
     # Import TensorFlow/Keras *before* seeding, as the pre-package train.py did: importing
     # them after seeding shifts the RNG streams (weights, replay sampling), so the same
-    # seed would no longer reproduce the same run.
+    # seed would no longer reproduce the same run.  The device is set up around the import
+    # (hiding GPUs must happen before it); this consumes no RNG.
+    devices.prepare(tc.device)
     import tensorflow as tf
     import tsc.agents.dqn  # noqa: F401
+    device = devices.configure(tc.device, tc.gpu_index)
     np.random.seed(seed)
     random.seed(seed)
     tf.random.set_seed(seed)
 
+    update_run_info(out_dir, device=device)
     network = network_for(cfg)
     observer = make_observer(network, cfg, seed)
     reward_fn = Reward(network, cfg.reward.kind, cfg.reward.neighbour_weight,

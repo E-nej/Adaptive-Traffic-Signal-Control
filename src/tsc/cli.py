@@ -8,6 +8,8 @@
     tsc diagnose messages configs/step2/evaluate.toml --runs "outputs/train/step2_full/s*"
     tsc accept "outputs/train/hier2_corridor_network/s*" --scenarios 6
     tsc parity record configs/step1/full.toml      (then, after a change: tsc parity check ...)
+    tsc devices                                     (what TensorFlow sees; GPU support verdicts)
+    tsc bench configs/step1/full.toml --mix cpu:5 --mix gpu:2,cpu:4
 
 Any config value can be overridden with --set section.key=value (TOML syntax),
 e.g. --set observation.noise=0.1 --set name=full_noise
@@ -40,7 +42,7 @@ def cmd_train(args):
     from tsc.experiments.train import train
     cfg = _load(args)
     seeds = parse_seeds(args.seeds) if args.seeds else None
-    for run_dir in train(cfg, seeds=seeds, out_root=args.out):
+    for run_dir in train(cfg, seeds=seeds, out_root=args.out, gpu_workers=args.gpu_workers):
         print(f'finished {run_dir}')
 
 
@@ -96,6 +98,39 @@ def cmd_diagnose(args):
     getattr(diagnose, args.what)(cfg, out_dir=args.out)
 
 
+def cmd_devices(args):
+    import json
+
+    from tsc import devices
+    from tsc.experiments.common import physical_cores, software_stack
+    info = devices.describe()
+    stack = software_stack()
+    print(f"TensorFlow {info['tensorflow']} ({info['backend']} build) {json.dumps(info['build'])}")
+    if not info['tensorflow'].startswith('2.21.'):
+        print(f"  WARNING: TensorFlow {info['tensorflow']} differs from the pinned 2.21.* "
+              f"(packages: {info['packages']}); recorded in run_info.json of every run")
+    if info['hidden_by_env']:
+        print(f"  GPUs hidden by environment: {info['hidden_by_env']}")
+    print(f"CPU: {stack['cpu']}, {physical_cores()} physical cores, {os.cpu_count()} threads, "
+          f"SIMD {' '.join(stack['cpu_flags'])}")
+    print(f"  suggested CPU-only --workers: {max(1, physical_cores())}")
+    if not info['gpus']:
+        print('GPUs: none visible to TensorFlow (see docs/GPU.md)')
+    for g in info['gpus']:
+        print(f"GPU #{g['index']}: {g['name']} [{g['arch'] or 'arch ?'}] -> {g['status'].upper()}: "
+              f"{g['reason']}")
+    if info['backend'] == 'rocm' and len(info['gpus']) > 1:
+        print('  note: several ROCm devices; if one is an integrated GPU, hide it with '
+              'HIP_VISIBLE_DEVICES (docs/GPU.md)')
+
+
+def cmd_bench(args):
+    from tsc.experiments.bench import bench, parse_mix
+    cfg = _load(args)
+    bench(cfg, [parse_mix(m) for m in args.mix], episodes=args.episodes, repeats=args.repeats,
+          out_dir=args.out)
+
+
 def _parity_config(args):
     from tsc.experiments import parity
     cfg = parity.short_config(_load(args), args.episodes, args.val_every, args.seed)
@@ -142,6 +177,8 @@ def build_parser():
     t = sub.add_parser('train', help='train RL controllers, one run per seed')
     with_config(t)
     t.add_argument('--seeds', help="training seeds, e.g. '0-4' or '0,2' (default: config)")
+    t.add_argument('--gpu-workers', type=int, default=0, metavar='K',
+                   help='hybrid scheduling: the first K seeds train on the GPU, the rest on the CPU')
     t.set_defaults(func=cmd_train)
 
     e = sub.add_parser('evaluate', help='evaluate baselines and trained runs over a demand sweep')
@@ -179,6 +216,17 @@ def build_parser():
     with_config(d)
     d.add_argument('--runs', nargs='*', help='trained run directories (globs ok)')
     d.set_defaults(func=cmd_diagnose)
+
+    dv = sub.add_parser('devices', help='CPU / GPUs TensorFlow can use, with support verdicts')
+    dv.set_defaults(func=cmd_devices)
+
+    b = sub.add_parser('bench', help='training throughput (episodes/min) under CPU/GPU worker mixes')
+    with_config(b)
+    b.add_argument('--mix', action='append', required=True,
+                   help="concurrent runs per device, e.g. 'cpu:5' or 'gpu:2,cpu:4' (repeatable)")
+    b.add_argument('--episodes', type=int, default=10, help='episodes per run (default 10)')
+    b.add_argument('--repeats', type=int, default=3, help='repetitions per mix (default 3)')
+    b.set_defaults(func=cmd_bench)
 
     pa = sub.add_parser('parity', help='record / check bit-exact fingerprints of a short training run')
     pa_sub = pa.add_subparsers(dest='action', required=True)

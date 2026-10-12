@@ -2,6 +2,7 @@
 
 import datetime
 import json
+import multiprocessing
 import os
 import platform
 import socket
@@ -44,8 +45,21 @@ def save_run_info(cfg, out_dir):
         'git_commit': _git_commit(),
         'sumo_version': _sumo_version(),
         'started': datetime.datetime.now().isoformat(timespec='seconds'),
+        'stack': software_stack(),
     }
     with open(os.path.join(out_dir, 'run_info.json'), 'w') as f:
+        json.dump(info, f, indent=2)
+
+
+def update_run_info(out_dir, **fields):
+    """Add fields to run_info.json (e.g. the device, known only once TensorFlow is imported)."""
+    path = os.path.join(out_dir, 'run_info.json')
+    with open(path) as f:
+        info = json.load(f)
+    info.update(fields)
+    if 'tensorflow' in sys.modules:
+        info['stack'] = software_stack()       # now including TensorFlow's build info
+    with open(path, 'w') as f:
         json.dump(info, f, indent=2)
 
 
@@ -77,6 +91,25 @@ def software_stack():
         tf = sys.modules['tensorflow']
         info['tf_build'] = {k: str(v) for k, v in tf.sysconfig.get_build_info().items()}
     return info
+
+
+def physical_cores():
+    """Number of physical CPU cores (not hardware threads)."""
+    cores = set()
+    try:
+        with open('/proc/cpuinfo') as f:
+            phys = core = None
+            for line in f:
+                if line.startswith('physical id'):
+                    phys = line.split(':')[1].strip()
+                elif line.startswith('core id'):
+                    core = line.split(':')[1].strip()
+                elif not line.strip() and core is not None:
+                    cores.add((phys, core))
+                    phys = core = None
+    except OSError:
+        pass
+    return len(cores) or max(1, (os.cpu_count() or 2) // 2)
 
 
 def _cpuinfo_field(name):
@@ -118,14 +151,21 @@ def _sumo_version():
         return None
 
 
-def run_parallel(fn, tasks, workers):
-    """Yield fn(task) results as they finish; in-process when workers <= 1 (easier debugging)."""
+def run_parallel(fn, tasks, workers, fresh=False):
+    """Yield fn(task) results as they finish; in-process when workers <= 1 (easier debugging).
+
+    fresh=True runs every task in a new process (needed when tasks use different TensorFlow
+    devices, which a process cannot switch once TensorFlow is initialised).
+    """
     os.environ.setdefault('TSC_TF_THREADS', '1')   # inherited by the worker processes
-    if workers <= 1 or len(tasks) <= 1:
+    if not fresh and (workers <= 1 or len(tasks) <= 1):
         for t in tasks:
             yield fn(t)
         return
-    with ProcessPoolExecutor(max_workers=min(workers, len(tasks))) as pool:
+    kwargs = {}
+    if fresh:
+        kwargs = dict(mp_context=multiprocessing.get_context('spawn'), max_tasks_per_child=1)
+    with ProcessPoolExecutor(max_workers=max(1, min(workers, len(tasks))), **kwargs) as pool:
         futures = [pool.submit(_call, fn, t) for t in tasks]
         for fut in as_completed(futures):
             yield fut.result()

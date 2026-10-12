@@ -192,6 +192,10 @@ class TrainConfig:
     plan_levels: list[float] = field(
         default_factory=lambda: [1000.0, 2000.0, 3000.0, 4000.0, 5000.0])
     plan_match: float = 0.5
+    # 'cpu' (the bit-exact reference) or 'gpu' (CUDA / ROCm; reproducible only on the same
+    # GPU and software stack, see docs/GPU.md); gpu_index picks one of several GPUs.
+    device: str = 'cpu'
+    gpu_index: int | None = None
 
 
 @dataclass
@@ -210,6 +214,9 @@ class EvaluateConfig:
     plan_level: float | None = None
     plan_direction: str = 'match'     # 'match' | 'opposite' (e.g. the AM plan in the PM peak)
     assignment: str = ''              # assignment.json of `tsc assign` (baseline select_assigned)
+    # Trained policies are evaluated on the CPU, whatever they were trained on, so
+    # evaluation results do not depend on the GPU model (reproducibility policy, docs/GPU.md).
+    device: str = 'cpu'
 
 
 @dataclass

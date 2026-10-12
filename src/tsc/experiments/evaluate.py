@@ -148,7 +148,7 @@ def run_task(task):
         meta = {'controller': name, 'config': name, 'train_seed': ''}
     else:
         tls = 'python'
-        controller, run_cfg = load_policy(run_dir, network, which=ec.which)
+        controller, run_cfg = load_policy(run_dir, network, which=ec.which, device=ec.device)
         if run_cfg.signals.control in PLAN_CONTROLS:
             kwargs = sim_kwargs(run_cfg)        # plan timing and the run's own shield
         elif cfg.signals.max_green is None and cfg.signals.max_red is None:

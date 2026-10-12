@@ -295,3 +295,19 @@ Files:
    - the combined `tsc parity check` passes;
    - the timing is measured: ≥ 10 episodes × 3 repetitions, before vs after, on step1/full and corridor/dir_coop.
      Report the median S per item and combined; it is expected near 1.2–1.3× but reported as measured.
+
+## Progress
+
+- **Step 0 (parity harness): done.**
+  - Recordings with the inert hook reproduce plain `main` exactly on step1/full, step1/base and corridor/dir_coop
+    (train_log plus all `best_*`/`final_*` weights).
+  - Route hashes ignore the generators' header comments, which hold a timestamp and paths.
+  - Golden manifests live in `outputs/parity/<host>/*/golden`.
+- **Step 1 (opt-in GPU path, `tsc devices`, `tsc bench`, `--gpu-workers`, `docs/GPU.md`): done.**
+  - CPU parity check: IDENTICAL on all three configs.
+  - On the P2000 (CUDA libraries as an overlay):
+    - two same-seed GPU runs are IDENTICAL (level 2);
+    - GPU vs CPU first diverge in episode 1 (level 3, as expected);
+    - the first bench gave S ≈ 1.04 for the best mix, because `replay()` on the GPU is only 1.35× faster than on a CPU core (launch-bound).
+  - So the P2000 is "works, not recommended".
+  - RX 7900 XT: waiting for the coworker's checklist (`docs/GPU.md`).

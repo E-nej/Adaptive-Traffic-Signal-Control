@@ -35,7 +35,8 @@ def default_out(cfg):
 def _messages_task(task):
     cfg, run_dir, mode, level, work, plans = task
     network = network_for(cfg)
-    controller, run_cfg = load_policy(run_dir, network, which=cfg.evaluate.which)
+    controller, run_cfg = load_policy(run_dir, network, which=cfg.evaluate.which,
+                                       device=cfg.evaluate.device)
     if not run_cfg.observation.comm:
         raise ValueError(f'{run_dir} was trained without communication')
     controller.obs.set_message_mode(mode, seed=0)

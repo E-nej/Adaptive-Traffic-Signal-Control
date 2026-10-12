@@ -69,8 +69,14 @@ def make_observer(network, cfg, seed):
                     approach_length=o.approach_length, layout=o.layout)
 
 
-def load_policy(run_dir, network, which='best'):
-    """(greedy RLController, run Config) of a trained run, on `network`."""
+def load_policy(run_dir, network, which='best', device='cpu'):
+    """(greedy RLController, run Config) of a trained run, on `network`.
+
+    The policy runs on `device` ('cpu' by default, whatever device it was trained on), so
+    evaluation results do not depend on the GPU it was trained on (docs/GPU.md).
+    """
+    from tsc import devices
+    devices.setup(device)
     cfg = load_run_config(run_dir)
     seed = cfg.train.seeds[0]
     observer = make_observer(network, cfg, seed + EVAL_NOISE_SEED_OFFSET)
