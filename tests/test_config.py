@@ -50,6 +50,18 @@ def test_seed_ranges_do_not_overlap():
         seeds.train(7, 0)
     assert seeds.validation(0) == 700001 and seeds.calibration(0) == 800000
     assert seeds.evaluation(9) == 900009
+    assert seeds.VALIDATION + 1000 < seeds.acceptance(0) < seeds.acceptance(999) < seeds.CALIBRATION
+
+
+def test_retired_keys_are_dropped(tmp_path):
+    """Keys of removed features (still in earlier runs' config.toml) load and are ignored,
+    elsewhere they are still unknown keys."""
+    p = tmp_path / 'c.toml'
+    p.write_text('[signals]\nselect_interval = 90\n')
+    assert config.load(p) == config.Config()
+    p.write_text('[observation]\nselect_interval = 90\n')
+    with pytest.raises(ValueError, match='select_interval'):
+        config.load(p)
 
 
 def test_legacy_step2_run_config():

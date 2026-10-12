@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Hierarchy (2H), manager side: `delay` reward (time lost on the approaches, the evaluated
+  quantity); `[hierarchy] default_expert` (`"auto"`: best single expert on validation) with a
+  Q-margin and a fallback checkpoint; `tsc accept` (best checkpoint vs its default on fresh
+  scenarios, seeds 750000+, one-sided Wilcoxon) and `[hierarchy] accept_scenarios`.
+- `[hierarchy] manager = "table"`: lookup-table manager built by running every expert at a grid
+  of demand levels, choosing by measured network flow and jam per 5-min reading
+  (`table_levels`, `table_scenarios`, `hysteresis`); configs in `configs/hierarchy/v3c/`.
+- Hierarchy configs `configs/hierarchy/v2/` (DQN manager, delay reward, default expert) and
+  `evaluate_corridor_opposite.toml`; results in `docs/HIERARCHY_REPORT.md`.
+- `networks/benchmarks/fetch.py`: downloads the RESCO benchmark scenarios (not committed).
 - `maxpressure_det` baseline: max-pressure on the E2 detectors only, with the experiment's
   detector noise / dropout (`configs/step2/baselines.toml`, with the safety shield).
 - `tsc compare`: paired comparison against a reference controller (relative difference per
@@ -24,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   about the receiver (queue / releases toward it, whether it serves it, spillback from it).
 
 - Cooperative reward (`reward.neighbour_weight`): r_i + α·Σ r_neighbours.
+
+### Removed
+- RL controller selection per junction (2G: `[signals] control = "select"`, `select_interval`,
+  `configs/select/*_comm*`, `*_nocomm*`): it failed on the corridor and on Maribor and the
+  hierarchy replaces it. The expert machinery (`controllers.select.ExpertPool`, renamed from
+  `SelectorActions`) and the best fixed assignment (`tsc assign`) stay. Earlier runs'
+  `select_interval` is ignored when loading (`config.RETIRED`).
 
 ### Changed
 - Rewards, the queue metric and exact-count max-pressure cover whole approaches, including

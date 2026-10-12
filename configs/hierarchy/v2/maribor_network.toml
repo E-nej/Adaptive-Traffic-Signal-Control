@@ -1,0 +1,56 @@
+# Step 2H: Maribor, one expert for the whole network
+# Step 2H v2: manager only (workers off), delay reward, default expert = the best single
+# expert on validation; the manager leaves it only if Q is better by 5 %, and the run
+# deploys it unless the learned manager beats it on validation.
+#   tsc train configs/hierarchy/v2/maribor_network.toml --seeds 0-2
+name = "hier2_maribor_network"
+workers = 3
+
+[network]
+path = "networks/maribor/titova.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.2
+tidal_share = 0.7
+tidal_axis = [0.0, 1.0]
+tidal_random = true
+min_distance = 300.0
+
+[signals]
+control = "hierarchy"
+decision_interval = 5    # workers decide every 5 s of green; the expert acts every second
+max_extension = 20
+hold_guard = true
+max_red = 150
+experts = ["greenwave", "coord_actuated", "maxpressure", "actuated"]
+actuated_loops = "sumo"
+
+[hierarchy]
+scope = "network"
+interval = 300
+worker = "off"
+reward = "delay"
+default_expert = "auto"
+margin = 0.05
+
+[observation]
+mode = "detector"
+comm = true
+message = "directional"
+noise = 0.05
+dropout = 0.02
+
+[reward]                 # junction agents only: unused with workers off
+kind = "multi"
+neighbour_weight = 0.5
+
+[agent]                  # junction agents only: unused with workers off
+shared = true
+
+[train]
+level_min = 2000.0
+level_max = 8000.0
+val_levels = [3000.0, 6000.0, 8000.0]
+plan_levels = [2000.0, 4000.0, 6000.0, 7000.0, 8000.0]
+plan_match = 0.5

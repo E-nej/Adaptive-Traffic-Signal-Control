@@ -104,6 +104,7 @@ ranges never overlap ([`src/tsc/seeds.py`](src/tsc/seeds.py)):
 |---|---|
 | training, seed *s*, episode *e* | 100000·*s* + *e* (*s* = 0…6) |
 | validation (model selection) | 700001 + *i* |
+| acceptance (`tsc accept`: learned policy vs its fallback) | 750000 + *i* |
 | calibration (Webster plans) | 800000 + *i* |
 | evaluation | 900000 + *i* |
 

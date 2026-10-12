@@ -1,0 +1,29 @@
+# Step 2H: hierarchies on the corridor with the opposite direction's plan (a stale plan).
+#   tsc evaluate configs/hierarchy/evaluate_corridor_opposite.toml
+name = "hier_corridor_opposite"
+workers = 12
+
+[network]
+path = "networks/corridor/corridor.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.6
+tidal_share = 0.7
+tidal_random = true
+
+[signals]
+actuated_loops = "sumo"
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[evaluate]
+baselines = ["actuated", "maxpressure_det", "greenwave_py", "plan_actuated"]
+runs = ["outputs/train/hier_corridor_network/s*", "outputs/train/hier2_corridor_network/s*",
+        "outputs/train/hier3c_corridor_network/s*"]
+plan_direction = "opposite"
+levels = [1000, 2000, 3000, 4000, 5000]
+n_seeds = 10

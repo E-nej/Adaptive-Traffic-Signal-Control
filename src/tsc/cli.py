@@ -1,4 +1,4 @@
-"""Command line: tsc train | evaluate | plot | compare | diagnose | assign.
+"""Command line: tsc train | evaluate | plot | compare | diagnose | assign | accept.
 
     tsc train configs/step1/full.toml --seeds 0-4 --workers 5
     tsc evaluate configs/baselines.toml
@@ -6,6 +6,7 @@
     tsc plot outputs/eval/baselines/results.csv outputs/eval/step1/results.csv --out outputs/plots
     tsc compare outputs/eval/baselines/results.csv outputs/eval/step1/results.csv --ref maxpressure
     tsc diagnose messages configs/step2/evaluate.toml --runs "outputs/train/step2_full/s*"
+    tsc accept "outputs/train/hier2_corridor_network/s*" --scenarios 6
 
 Any config value can be overridden with --set section.key=value (TOML syntax),
 e.g. --set observation.noise=0.1 --set name=full_noise
@@ -68,6 +69,18 @@ def cmd_compare(args):
             f.write(table.to_markdown())
 
 
+def cmd_accept(args):
+    import glob
+    from tsc.experiments.train import accept_runs
+    runs = sorted(d for pattern in args.runs for d in glob.glob(pattern))
+    if not runs:
+        raise SystemExit(f'No run directories match {args.runs}')
+    for run_dir, r in accept_runs(runs, args.scenarios, args.workers):
+        detail = (f" ({r['change']:+.1%} vs {r['default']} alone, p={r['p']:.3f})" if 'p' in r
+                  else f" ({r['reason']})")
+        print(f"{run_dir}: deployed {r['deployed']}{detail}")
+
+
 def cmd_assign(args):
     from tsc.experiments.assign import assign
     assign(_load(args), out_dir=args.out, passes=args.passes)
@@ -116,7 +129,14 @@ def build_parser():
     c.add_argument('--out', help='also write the table as Markdown')
     c.set_defaults(func=cmd_compare)
 
-    a = sub.add_parser('assign', help='best fixed controller per junction and demand level')
+    ac = sub.add_parser('accept', help='hierarchy: keep the learned manager only if it beats '
+                                       'its default expert on fresh scenarios')
+    ac.add_argument('runs', nargs='+', help='trained run directories (globs ok)')
+    ac.add_argument('--scenarios', type=int, help='per validation level (default: config, else 4)')
+    ac.add_argument('--workers', type=int, default=1, help='parallel processes')
+    ac.set_defaults(func=cmd_accept)
+
+    a = sub.add_parser('assign',help='best fixed controller per junction and demand level')
     with_config(a)
     a.add_argument('--passes', type=int, default=2, help='greedy search rounds')
     a.set_defaults(func=cmd_assign)

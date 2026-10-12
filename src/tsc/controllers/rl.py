@@ -5,9 +5,6 @@ What an action means depends on the control mode ([signals] control):
 'stages' : the action is the next green stage (StageActions)
 'plan'   : the junction runs a coordinated plan and the action adjusts it
            (FOLLOW / HOLD / EARLY, see controllers.plan.PlanActions)
-'select' : the action picks which controller runs the junction for the next
-           ~cycle (green wave / coordinated-actuated / max-pressure, see
-           controllers.select.SelectorActions)
 'hierarchy' : a manager picks the controller of each group of junctions
            (controllers.hierarchy); with worker = 'off' the junctions have no agents
 
@@ -22,7 +19,6 @@ import numpy as np
 
 from tsc.controllers.base import Controller
 from tsc.controllers.plan import PlanActions
-from tsc.controllers.select import SelectorActions
 
 
 class StageActions:
@@ -62,13 +58,6 @@ def make_actions(network, observer, cfg):
     if s.control == 'plan':
         return PlanActions(network, interval=s.decision_interval, max_extension=s.max_extension,
                            guard=s.hold_guard)
-    if s.control == 'select':
-        o = cfg.observation
-        return SelectorActions(network, select_interval=s.select_interval,
-                               interval=s.decision_interval, max_extension=s.max_extension,
-                               noise=o.noise, dropout=o.dropout, e2_length=o.e2_length,
-                               comm=o.comm, seed=cfg.train.seeds[0], experts=s.experts,
-                               actuated_loops=s.actuated_loops)
     if s.control == 'hierarchy':
         from tsc.controllers.hierarchy import HierarchyActions
         return HierarchyActions(network, cfg, seed=cfg.train.seeds[0])
@@ -151,10 +140,14 @@ class RLController(Controller):
     def save(self, run_dir, which):
         for name, agent in self.learners().items():
             agent.save(weights_path(run_dir, which, name))
+        if hasattr(self.actions, 'save_meta'):
+            self.actions.save_meta(run_dir, which)
 
     def load(self, run_dir, which='best'):
         for name, agent in self.learners().items():
             agent.load(weights_path(run_dir, which, name))
+        if hasattr(self.actions, 'load_meta'):
+            self.actions.load_meta(run_dir, which)
         return self
 
 

@@ -24,6 +24,8 @@ dropout = 0.02
 
 [evaluate]
 baselines = ["actuated", "maxpressure_det", "greenwave_py", "actuated_py"]
-runs = ["outputs/train/hier_maribor_group/s*", "outputs/train/hier_maribor_network/s*"]
+runs = ["outputs/train/hier_maribor_group/s*", "outputs/train/hier_maribor_network/s*",
+        "outputs/train/hier2_maribor_group/s*", "outputs/train/hier2_maribor_network/s*",
+        "outputs/train/hier3c_maribor_network/s*"]
 levels = [2000, 4000, 6000, 7000, 8000]
 n_seeds = 10

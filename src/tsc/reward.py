@@ -2,7 +2,7 @@
 
 from tsc.detectors import e2_id
 
-KINDS = ('wait', 'multi', 'queue', 'det_queue')
+KINDS = ('wait', 'multi', 'queue', 'det_queue', 'delay')
 
 
 class Reward:
@@ -15,6 +15,9 @@ class Reward:
     kind='queue' : -halting vehicles on the approaches
     kind='det_queue' : -jam length (vehicles) seen by the E2 detectors, i.e. a reward
                    a real installation can compute
+    kind='delay' : -time lost on the approaches this second, Σ n·(1 - v̄/v_max) per lane
+                   (the delay the evaluation measures: it also counts slowing down, which
+                   'queue' and 'wait' miss, e.g. the stops a green wave saves)
     All are divided by the number of incoming lanes.  Ground-truth rewards cover the whole
     approach: the controlled lanes plus the edge chain before them (network.approach_edges,
     e.g. the road before a left-turn bay).
@@ -27,6 +30,7 @@ class Reward:
         self.kind = kind
         self.neighbour_weight = neighbour_weight
         self.prev_wait = {tl_id: 0.0 for tl_id in network.tl_ids}
+        self.v_max = {}                   # lane -> speed limit (kind 'delay')
 
     def reset(self):
         self.prev_wait = {tl_id: 0.0 for tl_id in self.network.tl_ids}
@@ -50,6 +54,10 @@ class Reward:
         if self.kind == 'det_queue':
             return -sum(api.lanearea.getJamLengthVehicle(e2_id(l)) for l in lanes) / len(lanes)
         chain = self.network.approach_edges[tl_id]
+        if self.kind == 'delay':
+            lost = (sum(self._lost(api.lane, l, self._speed(api, l)) for l in lanes)
+                    + sum(self._lost(api.edge, e, self._speed(api, f'{e}_0')) for e in chain))
+            return -lost / len(lanes)
         halting = (sum(api.lane.getLastStepHaltingNumber(l) for l in lanes)
                    + sum(api.edge.getLastStepHaltingNumber(e) for e in chain))
         if self.kind == 'queue':
@@ -68,3 +76,16 @@ class Reward:
             else:
                 raise ValueError(self.kind)
         return r / len(lanes)
+
+    def _speed(self, api, lane):
+        if lane not in self.v_max:
+            self.v_max[lane] = max(1.0, api.lane.getMaxSpeed(lane))
+        return self.v_max[lane]
+
+    @staticmethod
+    def _lost(domain, item, v_max):
+        """Time lost this second by the vehicles on a lane / edge: n·(1 - v̄/v_max)."""
+        n = domain.getLastStepVehicleNumber(item)
+        if not n:
+            return 0.0
+        return n * max(0.0, 1.0 - domain.getLastStepMeanSpeed(item) / v_max)
