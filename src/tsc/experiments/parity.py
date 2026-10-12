@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import socket
 import time
 
@@ -32,6 +33,7 @@ from tsc.experiments.common import network_for, software_stack
 # only fills them, is off in training episodes; the reward's CO2 term is unaffected).
 IGNORED_FIELDS = ('seconds', 'co2_g_per_veh', 'co2_kg_total')
 MANIFEST = 'manifest.json'
+XML_COMMENT = re.compile(rb'<!--.*?-->', re.DOTALL)
 
 
 def parity_root(cfg):
@@ -69,7 +71,8 @@ def record(cfg, out_dir):
 def fingerprint(ep, info):
     """Everything about one finished episode that must be reproduced exactly (no RNG used)."""
     with open(info['route'], 'rb') as f:
-        route = hashlib.sha256(f.read()).hexdigest()
+        # without the generators' header comments (timestamp, output paths)
+        route = hashlib.sha256(XML_COMMENT.sub(b'', f.read())).hexdigest()
     return {
         'episode': ep,
         'row': {k: _plain(v) for k, v in info['row'].items()},
