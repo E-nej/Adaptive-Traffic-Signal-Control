@@ -55,6 +55,8 @@ class SignalConfig:
                                       # coordinated plan: FOLLOW / HOLD / EARLY, step 2F)
                                       # | 'select' (pick the junction's controller, step 2G)
     max_extension: int = 20           # s, plan control: longest green extension past the plan
+    hold_guard: bool = False          # plan control: extend only if the next stage keeps its
+                                      # minimum green; catch up without skipping stages
     select_interval: int = 90         # s, 'select' control: time between controller choices
     experts: list[str] = field(       # 'select' control: controllers to choose from
         default_factory=lambda: ['greenwave', 'coord_actuated', 'maxpressure'])

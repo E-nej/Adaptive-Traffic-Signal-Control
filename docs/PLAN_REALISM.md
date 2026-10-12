@@ -255,6 +255,9 @@ stages behind rejoins the plan.
       hides the difference (it partly selects the luckiest validation). 300 episodes are no
       better than 150 (`plan_dir_shared`). At 1000 veh/h the best checkpoints reach 39–45 s vs
       52–66 s for the plan; the final weights are less stable there.
+      Message diagnostic (`plan_dir_shared_long`, final weights, opposite plans): zeroed
+      messages +32 / +36 %, wrong-neighbour messages **+6.7 / +1.9 %** at 2000 / 4000 veh/h (both
+      significant) — the messages are used, and partly as neighbour-specific information.
 
 ## Step 2G — Choosing the controller per junction
 Each road may have a different best controller, so each junction picks one of several experts

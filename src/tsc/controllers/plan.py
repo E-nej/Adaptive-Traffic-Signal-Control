@@ -35,10 +35,14 @@ class PlanActions:
     extra_dim = 6           # plan features appended to the observation
     needs_plan = True
 
-    def __init__(self, network, interval=5, max_extension=20):
+    def __init__(self, network, interval=5, max_extension=20, guard=False):
         self.network = network
         self.interval = interval
         self.max_extension = max_extension
+        # guard: a green may only be held if the next stage still gets its minimum green
+        # within its planned window, and a junction behind the plan catches up one stage at a
+        # time instead of skipping stages (plans with short stage windows, e.g. Maribor)
+        self.guard = guard
         self.plans = None
 
     def set_plans(self, plans):
@@ -82,7 +86,7 @@ class PlanActions:
         mask = np.ones(N_ACTIONS, dtype=bool)
         # holding only matters when the planned switch is due within the next interval,
         # and only within the extension budget
-        mask[HOLD] = -self.interval < late < self.max_extension
+        mask[HOLD] = -self.interval < late < self.max_extension and             self._room(sim, tl_id, c, t + self.interval)
         mask[EARLY] = c <= n and plan.k > 1           # not when already ahead of the plan
         return mask
 
@@ -95,14 +99,22 @@ class PlanActions:
             c += 1
         elif c < n:
             late = t - plan.window_end(c)
-            if action == HOLD and late < self.max_extension:
+            if action == HOLD and late < self.max_extension and self._room(sim, tl_id, c, t):
                 pass
-            elif n - c >= 2:
+            elif n - c >= 2 and not self.guard:
                 c = n                                 # fell behind: rejoin the plan
             else:
                 c += 1
         self.count[tl_id] = c
         return plan.stage(c)
+
+    def _room(self, sim, tl_id, c, t):
+        """With the guard: would the stage after window c still get its minimum green within
+        its planned window if the current green ends at time t?"""
+        if not self.guard:
+            return True
+        head = sim.heads[tl_id]
+        return t + head.yellow + head.all_red + head.min_green <= self.plans[tl_id].window_end(c + 1)
 
     def features(self, sim, tl_id):
         """[planned stage of now (scaled index), s to the planned switch, ahead/behind,
