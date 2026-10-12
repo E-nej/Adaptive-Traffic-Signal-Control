@@ -1,0 +1,40 @@
+# Our RL (step-2 setup: detector state, queue reward, shield) on the cologne1 benchmark.
+# Every episode replays the scenario's demand (the same route file, new SUMO seed).
+#   tsc train configs/benchmarks/rl/cologne1.toml --seeds 0-2
+#   tsc evaluate configs/benchmarks/cologne1.toml --runs "outputs/train/rl_cologne1/s*" --no-baselines --out outputs/eval/rl_cologne1
+name = "rl_cologne1"
+workers = 3
+
+[network]
+path = "networks/benchmarks/cologne1/cologne1.net.xml"
+rebuild_tls = false      # the scenario's own programs (its fixed-time baseline)
+yellow = 3
+all_red = 0
+min_green = 7
+
+[demand]
+generator = "file"
+route_files = ["networks/benchmarks/cologne1/cologne1.rou.xml"]
+begin = 25200
+duration = 3600
+count_undeparted = true  # as RESCO: vehicles still waiting to enter count in the delay
+
+[signals]
+decision_interval = 10
+max_green = 60           # the step-2 safety shield
+max_red = 90
+
+[observation]            # step 2: detectors with noise / dropout, no messages
+mode = "detector"
+comm = false
+noise = 0.05
+dropout = 0.02
+
+[reward]
+kind = "queue"
+
+[train]
+episodes = 150
+level_min = 1.0          # the demand is the scenario's own
+level_max = 1.0
+val_levels = [1.0]
