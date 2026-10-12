@@ -306,7 +306,15 @@ Switching is safe (SignalHead intergreens; a plan expert rejoins the plan).
       Unlike the corridor, the green wave is not the reference here: signals are sparse and far
       apart, so isolated adaptive control wins. Opposite-direction plans cost the green wave
       +33–37 % at 6000–7000 veh/h.
-- [ ] 3.5 RL on the plan (`configs/plan/maribor_dir_shared.toml`, 3 seeds).
+- [x] 3.5 RL on the plan (`configs/plan/maribor_dir_shared.toml`, 3 seeds × 150 episodes):
+      **fails on Maribor** — +58 to +138 % delay vs the plan replay at 4000–8000 veh/h (tuned
+      plans), +35 to +78 % with opposite plans, teleports at high demand. Validation gets worse
+      during training (144 → ~230 s). One cause found: with short stage windows a 20 s extension
+      can put a junction two windows behind, and the catch-up then skips a stage (37 skips per
+      hour in one run), starving an approach for a full 122 s cycle.
+- [ ] 3.6 Retry with `[signals] hold_guard = true` (extend only if the next stage keeps its
+      minimum green inside its window; catch up without skipping), with and without the
+      cooperative reward (α = 0.5).
 
 ## Later (not now)
 - Real counts (municipality / DRSI counters) → routeSampler, real signal plans.
