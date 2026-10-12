@@ -1,0 +1,27 @@
+# Step 2H.3: trained hierarchy on the corridor vs the classic controllers (as 2E.5 / 2F).
+#   tsc evaluate configs/hierarchy/evaluate_corridor.toml
+name = "hier_corridor"
+workers = 12
+
+[network]
+path = "networks/corridor/corridor.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.6
+tidal_share = 0.7
+tidal_random = true
+
+[signals]
+actuated_loops = "sumo"
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[evaluate]
+baselines = ["actuated", "maxpressure_det", "greenwave_py", "plan_actuated"]
+runs = ["outputs/train/hier_corridor_network/s*"]
+levels = [1000, 2000, 3000, 4000, 5000]
+n_seeds = 10
