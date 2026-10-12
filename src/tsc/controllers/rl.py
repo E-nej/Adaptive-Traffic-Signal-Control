@@ -72,6 +72,10 @@ def make_agents(network, observer, agent_cfg, actions=None):
         return {}
     n_actions = actions.n_actions if actions is not None else network.max_greens
     dim = observer.dim + (actions.extra_dim if actions is not None else 0)
+    if hasattr(actions, 'make_agents'):         # e.g. hierarchy with per-expert workers
+        made = actions.make_agents(dim + (len(network.tl_ids) if agent_cfg.shared else 0))
+        if made is not None:
+            return made
     if agent_cfg.shared:
         agent = DQNAgent.from_config(dim + len(network.tl_ids), n_actions, agent_cfg)
         return {tl_id: agent for tl_id in network.tl_ids}
@@ -132,7 +136,7 @@ class RLController(Controller):
 
     def learners(self):
         """Every network of the policy: {name: agent} (junction agents, manager)."""
-        named = dict(self.agents)
+        named = {k: a for k, a in self.agents.items() if hasattr(a, 'save')}
         if hasattr(self.actions, 'learners'):
             named.update(self.actions.learners())
         return named

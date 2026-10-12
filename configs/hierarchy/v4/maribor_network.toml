@@ -1,0 +1,54 @@
+# Step 2H: Maribor, one expert for the whole network
+# Step 2H.5 (v4): lookup manager over "expert + its worker" (worker runs of
+# configs/hierarchy/workers/, same training seed); experts without an accepted worker run alone.
+#   tsc train configs/hierarchy/v4/maribor_network.toml --seeds 0-2
+name = "hier4_maribor_network"
+workers = 12
+
+[network]
+path = "networks/maribor/titova.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.2
+tidal_share = 0.7
+tidal_axis = [0.0, 1.0]
+tidal_random = true
+min_distance = 300.0
+
+[signals]
+control = "hierarchy"
+decision_interval = 5    # workers decide every 5 s of green; the expert acts every second
+max_extension = 20
+experts = ["greenwave", "coord_actuated", "maxpressure", "actuated"]
+actuated_loops = "sumo"
+
+[hierarchy]
+scope = "network"
+interval = 300
+worker = "expert"
+worker_runs = { maxpressure = "outputs/train/wk_maribor_maxpressure/s{seed}", actuated = "outputs/train/wk_maribor_actuated/s{seed}" }
+manager = "table"
+table_scenarios = 6
+hysteresis = 2
+
+[observation]
+mode = "detector"
+comm = true
+message = "directional"
+noise = 0.05
+dropout = 0.02
+
+[reward]                 # unused here (nothing is trained in this run)
+kind = "multi"
+neighbour_weight = 0.5
+
+[agent]                  # must match the worker runs (shared network + junction one-hot)
+shared = true
+
+[train]
+level_min = 2000.0
+level_max = 8000.0
+val_levels = [3000.0, 6000.0, 8000.0]
+plan_levels = [2000.0, 4000.0, 6000.0, 7000.0, 8000.0]
+plan_match = 0.5

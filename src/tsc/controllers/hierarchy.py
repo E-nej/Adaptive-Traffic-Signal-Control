@@ -31,7 +31,7 @@ from tsc.detectors import e1_id, e2_capacity, e2_id
 SCOPES = ('network', 'group', 'junction')
 GROUP_FEATS = 5            # jam ratio, occupancy, speed ratio, flow, jam now
 SAT_FLOW = 0.5             # veh/s per lane (1800 veh/h): flow normalisation
-WORKERS = ('off', 'residual')
+WORKERS = ('off', 'residual', 'expert')
 AGREE, HOLD_W, SWITCH = 0, 1, 2        # worker actions
 N_WORKER_ACTIONS = 3
 
@@ -259,6 +259,11 @@ class HierarchyActions:
                           plan's timing stays the reference.  Input: the junction's
                           observation + the active expert, whether it wants to switch, the
                           extension used and the plan features (zeros without a plan).
+    worker = 'expert'   : as 'residual', but each expert has its own worker, trained with
+                          that expert always active ([hierarchy] worker_runs: a run with
+                          manager = 'fixed' per expert).  A junction uses the worker of the
+                          expert active there; experts without one (or whose worker did not
+                          pass acceptance) run alone.  Nothing is trained in this mode.
     """
 
     needs_plan = True
@@ -268,7 +273,8 @@ class HierarchyActions:
         if h.worker not in WORKERS:
             raise ValueError(f'Unknown worker mode {h.worker!r}; choose from {WORKERS}')
         self.network = network
-        self.has_workers = h.worker == 'residual'
+        self.has_workers = h.worker in ('residual', 'expert')
+        self.worker_mode = h.worker
         self.interval = s.decision_interval
         self.max_extension = s.max_extension
         self.selector = ExpertPool(network, interval=s.decision_interval,
@@ -298,6 +304,35 @@ class HierarchyActions:
             self.set_default(self.names.index(h.default_expert))
         self.group_of = {t: i for i, g in enumerate(groups) for t in g}
         self.force_agree = False    # workers always AGREE (single-expert validation, fallback)
+        self.expert_workers = {}    # worker = 'expert': expert index -> {tl_id: agent}
+        if h.worker == 'expert':
+            self._load_expert_workers(network, h.worker_runs, seed)
+
+    def _load_expert_workers(self, network, runs, seed):
+        from tsc.experiments.runs import load_policy
+        for name, run_dir in runs.items():
+            run_dir = run_dir.format(seed=seed)
+            policy, run_cfg = load_policy(run_dir, network, 'best')
+            rh = run_cfg.hierarchy
+            trained_for = run_cfg.signals.experts[rh.fixed_expert]
+            if rh.manager != 'fixed' or rh.worker != 'residual' or trained_for != name:
+                raise ValueError(f'{run_dir}: not a worker run for expert {name!r} '
+                                 f'(manager {rh.manager!r}, worker {rh.worker!r}, '
+                                 f'expert {trained_for!r})')
+            if not policy.actions.force_agree:          # else: its expert alone was better
+                self.expert_workers[self.names.index(name)] = policy.agents
+
+    def make_agents(self, dim):
+        """worker = 'expert': per junction, the worker of whichever expert is active (None
+        otherwise: the usual trainable agents)."""
+        if self.worker_mode != 'expert':
+            return None
+        for agents in self.expert_workers.values():
+            n = next(iter(agents.values())).n_states
+            if n != dim:
+                raise ValueError(f'worker input size {n} != {dim}: the worker runs need the '
+                                 f'same observation, experts and agent sharing as this run')
+        return {t: ExpertWorker(self, t) for t in self.network.tl_ids}
 
     def set_default(self, expert):
         self.manager.default = expert
@@ -475,4 +510,18 @@ class HierarchyActions:
         return np.concatenate([own, [wants, held], plan]).astype(np.float32)
 
 
-__all__ = ['HierarchyActions', 'Manager', 'SCOPES', 'make_groups']
+class ExpertWorker:
+    """Junction agent for worker = 'expert': acts with the worker of the active expert
+    (AGREE if it has none).  Not trainable; the workers come from their own runs."""
+
+    def __init__(self, actions, tl_id):
+        self.actions, self.tl_id = actions, tl_id
+
+    def act(self, state, mask, epsilon=0.0):
+        agents = self.actions.expert_workers.get(self.actions.expert(self.tl_id))
+        if agents is None or self.actions.force_agree:
+            return AGREE
+        return agents[self.tl_id].act(state, mask, 0.0)
+
+
+__all__ = ['ExpertWorker', 'HierarchyActions', 'Manager', 'SCOPES', 'make_groups']

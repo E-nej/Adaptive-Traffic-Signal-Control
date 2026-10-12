@@ -90,10 +90,14 @@ class HierarchyConfig:
                                       # `margin`·|Q(default)|, and a run whose manager never
                                       # beats it on validation deploys it (best checkpoint)
     margin: float = 0.05
-    accept_scenarios: int = 0         # with a default expert: after training, the best
-                                      # checkpoint must beat the default on this many fresh
-                                      # scenarios per validation level (paired, one-sided
-                                      # Wilcoxon p < 0.05), else the run deploys the default
+    accept_scenarios: int = 0         # with a default expert (or workers under a fixed
+                                      # expert): after training, the best checkpoint must
+                                      # beat that expert alone on this many fresh scenarios
+                                      # per validation level (paired, one-sided Wilcoxon
+                                      # p < 0.05), else the run deploys the expert alone
+    worker_runs: dict[str, str] = field(default_factory=dict)  # worker = 'expert': trained
+                                      # worker run per expert name ('{seed}' = this run's
+                                      # training seed); experts without one run alone
     gamma: float = 0.8
     lr: float = 1e-3
     tau: float = 0.01

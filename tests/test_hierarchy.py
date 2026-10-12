@@ -348,3 +348,60 @@ def test_table_manager(corridor, work_root):
     assert [policy.actions.names[e] for _, e in table] == list(best)
     assert table[0][0][:, 0].mean() < table[1][0][:, 0].mean()   # more demand, more flow
     assert len(table[0][0]) == 300 // 60         # one key per interval
+
+
+@pytest.mark.sumo
+def test_expert_workers(corridor, work_root):
+    """Expert-specific workers: a worker run (fixed expert + residual worker) starts from its
+    expert alone and is accepted or not on fresh scenarios; a table run with
+    worker = 'expert' then uses it whenever that expert is active."""
+    import json
+    from tsc import config as config_mod
+    from tsc.controllers.hierarchy import AGREE, ExpertWorker
+    from tsc.experiments.runs import load_policy
+    from tsc.experiments.train import accept, train_one
+    small = {'network': {'path': CORRIDOR}, 'workers': 1,
+             'demand': {'generator': 'od', 'duration': 300, 'tidal_share': 0.7},
+             'agent': {'hidden': [16], 'shared': True, 'learn_start': 50, 'batch_size': 16}}
+    cfg = hierarchy_cfg(manager='fixed', fixed_expert=1, worker='residual')
+    cfg.reward.kind = 'delay'
+    cfg = config_mod.replace(cfg, name='wk_actuated', output_dir=os.path.join(work_root, 'out'),
+                             train={'seeds': [0], 'episodes': 1, 'val_every': 5,
+                                    'val_levels': [2500.0], 'level_min': 2500.0,
+                                    'level_max': 2500.0}, **small)
+    wk = os.path.join(work_root, 'out', 'wk_actuated', 's0')
+    train_one(cfg, wk)
+    result = accept(wk, per_level=2)
+    assert result['default'] == 'actuated'
+    policy, _ = load_policy(wk, corridor, 'best')
+    assert policy.actions.force_agree == (result['deployed'] == 'actuated')
+
+    # pretend the worker passed, so the table run uses it
+    meta_path = os.path.join(wk, 'best_hierarchy.json')
+    with open(meta_path) as f:
+        meta = json.load(f)
+    meta.update(agree=False, forced=None)
+    with open(meta_path, 'w') as f:
+        json.dump(meta, f)
+    run = os.path.join(work_root, 'out', 'wk_table', 's0')
+    tcfg = hierarchy_cfg(manager='table', worker='expert', interval=60,
+                         table_levels=[1000.0, 3500.0], table_scenarios=1,
+                         worker_runs={'actuated': wk.replace('s0', 's{seed}')})
+    tcfg = config_mod.replace(tcfg, name='wk_table', output_dir=os.path.join(work_root, 'out'),
+                              train={'seeds': [0]}, **small)
+    train_one(tcfg, run)
+    policy, _ = load_policy(run, corridor, 'best')
+    actions = policy.actions
+    assert set(actions.expert_workers) == {1}                   # actuated has a worker
+    assert all(isinstance(a, ExpertWorker) for a in policy.agents.values())
+    assert policy.learners() == {}                               # nothing to save
+    tl = corridor.tl_ids[0]
+    worker = actions.expert_workers[1][tl]
+    state = np.zeros(worker.n_states, dtype=np.float32)
+    mask = np.ones(3, dtype=bool)
+    actions.manager.choice = [0] * len(actions.manager.groups)  # max-pressure: no worker
+    assert policy.agents[tl].act(state, mask) == AGREE
+    actions.manager.choice = [1] * len(actions.manager.groups)  # actuated: its worker acts
+    assert policy.agents[tl].act(state, mask) == worker.act(state, mask)
+    with pytest.raises(ValueError, match='expert'):
+        train_one(config_mod.replace(tcfg, hierarchy={'manager': 'learned'}), run + '_x')

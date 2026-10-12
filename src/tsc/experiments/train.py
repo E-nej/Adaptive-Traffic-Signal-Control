@@ -118,13 +118,42 @@ def _default_expert(cfg, network, greedy, work_dir, library, out_dir, label):
     return vals[name]
 
 
+def _worker_baseline(cfg, network, greedy, work_dir, library, out_dir, label):
+    """Workers under a fixed expert (expert-specific workers): validate the expert alone
+    (workers agreeing) and save it as the first 'best' checkpoint, so the run deploys the
+    expert alone unless its workers beat it on validation.  Returns its validation delay."""
+    actions = greedy.actions
+    actions.set_training(False, 0.0)
+    actions.force_agree = True
+    val = validate(network, cfg, greedy, work_dir, library)
+    greedy.save(out_dir, 'best')
+    actions.force_agree = False
+    print(f'[{label}] {actions.names[cfg.hierarchy.fixed_expert]} alone (val delay): {val:.1f}',
+          flush=True)
+    return val
+
+
+def _uses_fallback(cfg):
+    """Hierarchy runs whose best checkpoint starts as a non-learning fallback: a learned
+    manager with a default expert, or workers under a fixed expert."""
+    h = cfg.hierarchy
+    if cfg.signals.control != 'hierarchy':
+        return None
+    if h.manager == 'learned' and h.default_expert:
+        return 'manager'
+    if h.manager == 'fixed' and h.worker == 'residual':
+        return 'workers'
+    return None
+
+
 def accept(run_dir, per_level=None, alpha=0.05):
-    """Hierarchy with a default expert: does the best checkpoint beat the default expert
-    alone?  Both run on fresh scenarios (acceptance seeds, `per_level` per validation
+    """Does the best checkpoint beat its fallback?  A learned manager is compared with its
+    default expert alone, workers under a fixed expert with that expert alone (workers
+    agreeing).  Both run on fresh scenarios (acceptance seeds, `per_level` per validation
     level), paired; the learned policy is kept only if its mean delay is lower and a
     one-sided Wilcoxon test gives p < alpha, else the best checkpoint is switched to the
-    default alone.  Validation picked the checkpoint as the best of many noisy readings,
-    so its own score is biased in its favour.  Writes accept.json; returns its content."""
+    fallback.  Validation picked the checkpoint as the best of many noisy readings, so its
+    own score is biased in its favour.  Writes accept.json; returns its content."""
     import json
     from scipy import stats
     from tsc.experiments.runs import load_policy, load_run_config
@@ -135,24 +164,34 @@ def accept(run_dir, per_level=None, alpha=0.05):
     policy, _ = load_policy(run_dir, network, 'best')
     actions = policy.actions
     manager = actions.manager
-    if manager.default is None:
-        raise ValueError(f'{run_dir}: no default expert (hierarchy.default_expert)')
-    default = actions.names[manager.default]
+    mode = _uses_fallback(cfg)
+    if mode == 'manager':
+        default = actions.names[manager.default]
+        done = manager.forced is not None
+    elif mode == 'workers':
+        default = actions.names[manager.fixed_expert]
+        done = actions.force_agree
+    else:
+        raise ValueError(f'{run_dir}: nothing to accept (needs hierarchy.default_expert, or '
+                         f'workers under a fixed expert)')
     out = {'default': default, 'scenarios': per_level * len(cfg.train.val_levels)}
-    if manager.forced is not None:          # validation never beat the default
-        out.update(deployed=default, reason='best checkpoint is already the default')
+    if done:                                # validation never beat the fallback
+        out.update(deployed=default, reason='best checkpoint is already the fallback')
     else:
         work_dir = os.path.join(run_dir, 'work')
         os.makedirs(work_dir, exist_ok=True)
         args = (network, cfg, policy, work_dir, library, per_level, seeds_mod.acceptance)
         learned = np.array(scenario_delays(*args))
-        actions.force(manager.default)
+        if mode == 'manager':
+            actions.force(manager.default)
+        else:
+            actions.force_agree = True
         alone = np.array(scenario_delays(*args))
         diff = learned - alone
         p = float(stats.wilcoxon(diff, alternative='less').pvalue) if diff.any() else 1.0
         keep = diff.mean() < 0 and p < alpha
         if keep:
-            actions.force(None)
+            actions.force(None)             # learned manager, workers active
         actions.save_meta(run_dir, 'best')
         out.update(deployed='learned' if keep else default, p=p,
                    learned=float(learned.mean()), alone=float(alone.mean()),
@@ -173,7 +212,7 @@ def _table_task(task):
     (seed,) = cfg.train.seeds
     route_seed = seeds_mod.train(seed, TABLE_EPISODE + k)
     controller = make_controller(network, make_observer(network, cfg, seed), cfg)
-    controller.actions.force(expert)
+    controller.actions.force(expert, agree=cfg.hierarchy.worker != 'expert')   # + its worker
     controller.reseed(route_seed)
     run_dir = os.path.join(work_dir, f'table_{level:.0f}_{k}_{expert}')
     os.makedirs(run_dir, exist_ok=True)
@@ -188,8 +227,8 @@ def _table_task(task):
 
 
 def build_table(cfg, greedy, out_dir, label):
-    """Manager 'table': every expert at every level of the grid (table_scenarios scenarios
-    with matching plans), the best one per level by mean delay, keyed by the network flow
+    """Manager 'table': every expert (with its worker, worker = 'expert') at every level of
+    the grid (table_scenarios scenarios with matching plans), the best one per level by mean delay, keyed by the network flow
     and jam ratio the manager measured at that level in each interval (mean over experts
     and scenarios).  Saves it as the 'best' and 'final' policy and the measurements as
     table.csv (delays) and table_keys.csv (readings)."""
@@ -277,8 +316,14 @@ def train_one(cfg, out_dir):
     if cfg.signals.control == 'hierarchy' and cfg.hierarchy.manager == 'table':
         build_table(cfg, greedy, out_dir, label)        # nothing to train
         return
-    if cfg.signals.control == 'hierarchy' and cfg.hierarchy.default_expert:
+    if cfg.signals.control == 'hierarchy' and cfg.hierarchy.worker == 'expert':
+        raise ValueError('worker = "expert" uses workers trained in their own runs; only '
+                         'manager = "table" builds a run with them')
+    fallback = _uses_fallback(cfg)
+    if fallback == 'manager':
         best_val = _default_expert(cfg, network, greedy, work_dir, library, out_dir, label)
+    elif fallback == 'workers':
+        best_val = _worker_baseline(cfg, network, greedy, work_dir, library, out_dir, label)
 
     for ep in range(tc.episodes):
         t0 = time.time()
@@ -368,8 +413,7 @@ def train_one(cfg, out_dir):
     greedy.save(out_dir, 'final')
     if log_file is not None:
         log_file.close()
-    h = cfg.hierarchy
-    if cfg.signals.control == 'hierarchy' and h.default_expert and h.accept_scenarios:
+    if fallback and cfg.hierarchy.accept_scenarios:
         result = accept(out_dir)
         print(f"[{label}] acceptance: deployed {result['deployed']} "
               f"({result.get('change', 0):+.1%}, p={result.get('p', float('nan')):.3f})", flush=True)
