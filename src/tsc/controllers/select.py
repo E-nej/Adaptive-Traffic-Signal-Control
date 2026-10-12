@@ -24,34 +24,52 @@ import numpy as np
 from tsc.controllers.base import Controller
 from tsc.controllers.maxpressure import DetectorMaxPressure
 from tsc.controllers.plan import PlanActuated, PlanController
-from tsc.detectors import e1_id
+from tsc.detectors import e1_id, e1u_id
 
 EXPERTS = ('greenwave', 'coord_actuated', 'maxpressure', 'actuated')
 DEFAULT_EXPERTS = ('greenwave', 'coord_actuated', 'maxpressure')
 
 
 class GapActuated(Controller):
-    """Isolated actuated control on the stop-line loops (the logic of SUMO's 'actuated'):
-    keep the green while vehicles keep arriving on the served lanes (gap < `gap` s), up to
-    `max_green` s, then switch to the next stage in order.  Needs a SignalHead that is
-    ready every second."""
+    """Isolated actuated control (the logic of SUMO's 'actuated'): keep the green while
+    vehicles keep arriving on the served lanes (gap < `gap` s), up to `max_green` s, then
+    switch to the next stage in order.  Needs a SignalHead that is ready every second.
 
-    def __init__(self, network, gap=3, max_green=60):
+    loops = 'stopline' : the stop-line loops (step 2G).  A vehicle standing on the loop
+                         (e.g. a left turner waiting for a gap) holds the green.
+    loops = 'upstream' : loops 2 s of travel before the stop line, where SUMO puts them.
+    loops = 'sumo'     : upstream loops, and like SUMO a lane that keeps its green in the
+                         next stage does not extend the current one.
+    """
+
+    LOOPS = {'stopline': e1_id, 'upstream': e1u_id, 'sumo': e1u_id}
+
+    def __init__(self, network, gap=3, max_green=60, loops='stopline'):
+        if loops not in self.LOOPS:
+            raise ValueError(f'Unknown loops {loops!r}; choose from {sorted(self.LOOPS)}')
         self.network = network
         self.gap = gap
         self.max_green = max_green
+        self.loop_id = self.LOOPS[loops]
         self.served = {
             tl_id: [sorted({lane for i, lane, _ in network.links[tl_id] if g[i] in 'Gg'})
                     for g in network.greens[tl_id]]
             for tl_id in network.tl_ids
         }
+        if loops == 'sumo':
+            self.served = {
+                tl_id: [sorted(set(lanes) - set(stages[(k + 1) % len(stages)]))
+                        if len(stages) > 1 else lanes
+                        for k, lanes in enumerate(stages)]
+                for tl_id, stages in self.served.items()
+            }
 
     def reset(self, sim):
         self.since = {l: 99 for tl in self.network.tl_ids for l in self.network.in_lanes[tl]}
 
     def tick(self, sim):
         for lane in self.since:
-            if sim.api.inductionloop.getLastStepVehicleNumber(e1_id(lane)) > 0:
+            if sim.api.inductionloop.getLastStepVehicleNumber(self.loop_id(lane)) > 0:
                 self.since[lane] = 0
             else:
                 self.since[lane] += 1
@@ -72,7 +90,7 @@ class SelectorActions:
 
     def __init__(self, network, select_interval=90, interval=5, max_extension=20,
                  noise=0.0, dropout=0.0, e2_length=50.0, comm=True, seed=0,
-                 experts=DEFAULT_EXPERTS):
+                 experts=DEFAULT_EXPERTS, actuated_loops='stopline'):
         unknown = set(experts) - set(EXPERTS)
         if unknown:
             raise ValueError(f'Unknown experts {sorted(unknown)}; choose from {EXPERTS}')
@@ -86,7 +104,7 @@ class SelectorActions:
             'coord_actuated': lambda: PlanActuated(network, interval, max_extension),
             'maxpressure': lambda: DetectorMaxPressure(noise=noise, dropout=dropout,
                                                        e2_length=e2_length, seed=seed),
-            'actuated': lambda: GapActuated(network),
+            'actuated': lambda: GapActuated(network, loops=actuated_loops),
         }
         self.experts = [make[name]() for name in self.names]
         self.n_actions = len(self.experts)

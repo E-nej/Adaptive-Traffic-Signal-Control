@@ -183,12 +183,15 @@ class Network:
             seen.add(edge.getID())
             chain.append(edge.getID())
 
-    def _neighbours(self):
-        """Signalised junctions reachable by following edges through unsignalised nodes.
+    def _neighbours(self, max_dist=None, strict=False):
+        """Signalised junctions reachable by following edges through unsignalised nodes
+        (within max_dist m of road, default NEIGHBOUR_RANGE; strict: the first edge counts
+        towards the limit too).
 
         A traffic light may control several nodes (joined junctions in OSM networks);
         its nodes are the ones its controlled lanes lead into.
         """
+        max_dist = NEIGHBOUR_RANGE if max_dist is None else max_dist
         node_tl = {}
         for tl_id in self.tl_ids:
             for _, in_lane, _ in self.links[tl_id]:
@@ -196,10 +199,32 @@ class Network:
         neighbours = {t: set() for t in self.tl_ids}
         for node_id, tl_id in sorted(node_tl.items()):
             for edge in self.sumo_net.getNode(node_id).getOutgoing():
-                for to_tl in _reach([edge], node_tl, tl_id, through_dead_ends=True):
+                for to_tl in _reach([edge], node_tl, tl_id, through_dead_ends=True,
+                                    max_dist=max_dist, strict=strict):
                     neighbours[tl_id].add(to_tl)
                     neighbours[to_tl].add(tl_id)
         return {t: sorted(v) for t, v in neighbours.items()}
+
+    def groups(self, max_dist):
+        """Signals split into groups of junctions linked by roads of at most max_dist m
+        (connected components), e.g. a coordinated arterial vs isolated junctions.
+        Groups are sorted by their first junction id."""
+        close = self._neighbours(max_dist, strict=True)
+        seen, groups = set(), []
+        for start in self.tl_ids:
+            if start in seen:
+                continue
+            group, stack = [], [start]
+            seen.add(start)
+            while stack:
+                t = stack.pop()
+                group.append(t)
+                for n in close[t]:
+                    if n not in seen:
+                        seen.add(n)
+                        stack.append(n)
+            groups.append(sorted(group))
+        return groups
 
     def _directions(self):
         """Which movements of a junction lead to a neighbour, and where they arrive.
@@ -229,12 +254,14 @@ class Network:
                 {k: sorted(v) for k, v in arrival.items()})
 
 
-def _reach(start_edges, node_tl, src, through_dead_ends):
+def _reach(start_edges, node_tl, src, through_dead_ends, max_dist=NEIGHBOUR_RANGE,
+           strict=False):
     """{signal: edges arriving at it} for the signals (other than `src`) reachable from
-    `start_edges` through unsignalised nodes within NEIGHBOUR_RANGE m (the start edges
-    themselves always count).  node_tl maps node id -> signal id."""
+    `start_edges` through unsignalised nodes within max_dist m (the start edges
+    themselves always count, unless strict).  node_tl maps node id -> signal id."""
     found, done = {}, set()
-    heap = [(e.getLength(), e.getID(), e) for e in start_edges]
+    heap = [(e.getLength(), e.getID(), e) for e in start_edges
+            if not strict or e.getLength() <= max_dist]
     heapq.heapify(heap)
     while heap:
         dist, eid, e = heapq.heappop(heap)
@@ -249,7 +276,7 @@ def _reach(start_edges, node_tl, src, through_dead_ends):
         elif through_dead_ends or node.getType() != 'dead_end':
             for nxt in node.getOutgoing():
                 d = dist + nxt.getLength()
-                if d <= NEIGHBOUR_RANGE and nxt.getID() not in done:
+                if d <= max_dist and nxt.getID() not in done:
                     heapq.heappush(heap, (d, nxt.getID(), nxt))
     return found
 

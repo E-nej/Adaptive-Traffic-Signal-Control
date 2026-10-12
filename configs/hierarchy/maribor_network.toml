@@ -1,0 +1,40 @@
+# Step 2H on Maribor: a manager picks one expert for the whole network every 5 min;
+# junctions run it unmodified (worker 'off').
+#   tsc train configs/hierarchy/maribor_network.toml --seeds 0-2
+name = "hier_maribor_network"
+workers = 3
+
+[network]
+path = "networks/maribor/titova.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.2
+tidal_share = 0.7
+tidal_axis = [0.0, 1.0]
+tidal_random = true
+min_distance = 300.0
+
+[signals]
+control = "hierarchy"
+decision_interval = 5
+max_extension = 20
+max_red = 150
+experts = ["greenwave", "coord_actuated", "maxpressure", "actuated"]
+actuated_loops = "sumo"   # the actuated expert as close to SUMO's as we got (2H)
+
+[hierarchy]
+scope = "network"
+interval = 300
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[train]
+level_min = 2000.0
+level_max = 8000.0
+val_levels = [3000.0, 6000.0, 8000.0]
+plan_levels = [2000.0, 4000.0, 6000.0, 7000.0, 8000.0]
+plan_match = 0.5

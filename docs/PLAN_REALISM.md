@@ -332,6 +332,45 @@ Switching is safe (SignalHead intergreens; a plan expert rejoins the plan).
       network of sparse, far-apart signals coordination is worth little, and isolated actuated
       control beats every plan-based controller by 20–30 % at 6000–8000 veh/h.
 
+## Step 2H — Hierarchy: a manager chooses the experts, junctions fine-tune them
+Goal: one system that is at least as good as the best classic controller on every network
+(no single classic controller is: the green wave wins the corridor, actuated / max-pressure
+win Maribor), with RL adding gains on top. Two levels (`[signals] control = "hierarchy"`,
+`controllers/hierarchy.py`):
+
+- **Manager** (top): every `[hierarchy] interval` s (default 300) picks one expert per group:
+  `scope = "network"` (one expert everywhere), `"group"` (signals linked by roads of at most
+  `group_range` m, `Network.groups`; Maribor at 400 m: 10 groups, the corridor: 1) or
+  `"junction"`. One small DQN shared by all groups. Its input does not depend on the network
+  (detector aggregates of the group and of the whole network, the group's expert, its share
+  of the signals), so a manager can be moved between networks. Reward: −mean queue per lane
+  in the group. `manager = "fixed"` runs one expert through the same machinery (baseline).
+- **Workers** (bottom): `worker = "off"` runs the chosen expert unmodified. Next: residual RL
+  per junction that fine-tunes the active expert (expert id as input).
+
+- [x] 2H.0 The selector's `actuated` expert was a weaker copy of SUMO's actuated control
+      (stop-line loops: a vehicle standing on the loop holds the green), so every 2G result
+      was capped below the baseline. `[signals] actuated_loops`, Maribor, delay [s]
+      (`configs/maribor/actuated_py*.toml`, 10 scenarios per level):
+
+      | actuated controller                         | 2000 | 4000 | 6000 | 7000 | 8000 |
+      |---------------------------------------------|------|------|------|------|------|
+      | SUMO                                        | 50   | 57   | 70   | 93   | 159  |
+      | Python, stop-line loops (2G, `stopline`)    | 54   | 64   | 86   | 121  | 176  |
+      | Python, loops 2 s upstream (`upstream`)     | 53   | 61   | 81   | 114  | 174  |
+      | + lanes green in the next stage ignored (`sumo`) | 52 | 60 | 74 | 105 | 163  |
+
+      `sumo` is within 4–6 % of SUMO up to 6000 veh/h, 2–12 % above. Using only priority (`G`)
+      movements' detectors changes nothing. The rest of the gap is unexplained; the exact fix
+      would be handing a junction to SUMO's own actuated program while that expert is active.
+- [x] 2H.1 Manager with `worker = "off"`: `configs/hierarchy/{maribor_network,maribor_group,
+      corridor_network}.toml`, tests in `tests/test_hierarchy.py`.
+- [ ] 2H.2 Train and evaluate 2H.1 (3 seeds × 150 episodes) against the best classic
+      controller per network and the uniform experts (`manager = "fixed"`).
+- [ ] 2H.3 Residual workers on the active expert (1–2 s decisions, shared network).
+- [ ] 2H.4 Imitation warm start; leave-one-network-out test (train on two networks, test on
+      the third).
+
 ## Summary (2026-10-12)
 1. Free stage choice by RL (the paper's setup) cannot match a green wave on an arterial
    (×3 delay at 4000 veh/h); communication gives it 6–10 %, not the coordination it lacks.
@@ -408,3 +447,5 @@ uv run tsc diagnose messages configs/step2/evaluate.toml         # do agents use
   parallel jobs (now built once), tlsCycleAdaptation giving zero/too-short greens at low demand
   (now recomputed), detectors on sub-metre OSM lanes (now multi-lane), a 120 s max-red shield
   overriding 122 s plan cycles (selector uses 150 s).
+- 2026-10-12: 2H started (branch `2h-hierarchy`): the actuated expert fixed (2H.0), manager
+  implemented (2H.1).

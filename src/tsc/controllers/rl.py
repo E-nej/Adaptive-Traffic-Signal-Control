@@ -8,6 +8,8 @@ What an action means depends on the control mode ([signals] control):
 'select' : the action picks which controller runs the junction for the next
            ~cycle (green wave / coordinated-actuated / max-pressure, see
            controllers.select.SelectorActions)
+'hierarchy' : a manager picks the controller of each group of junctions
+           (controllers.hierarchy); with worker = 'off' the junctions have no agents
 
 With a shared agent (agent.shared) all junctions use one network, trained on
 the transitions of every junction; a one-hot junction id is appended to the
@@ -65,7 +67,11 @@ def make_actions(network, observer, cfg):
         return SelectorActions(network, select_interval=s.select_interval,
                                interval=s.decision_interval, max_extension=s.max_extension,
                                noise=o.noise, dropout=o.dropout, e2_length=o.e2_length,
-                               comm=o.comm, seed=cfg.train.seeds[0], experts=s.experts)
+                               comm=o.comm, seed=cfg.train.seeds[0], experts=s.experts,
+                               actuated_loops=s.actuated_loops)
+    if s.control == 'hierarchy':
+        from tsc.controllers.hierarchy import HierarchyActions
+        return HierarchyActions(network, cfg, seed=cfg.train.seeds[0])
     if s.control == 'stages':
         return StageActions(network, observer)
     raise ValueError(f'Unknown control mode {s.control!r}')
@@ -73,6 +79,8 @@ def make_actions(network, observer, cfg):
 
 def make_agents(network, observer, agent_cfg, actions=None):
     from tsc.agents.dqn import DQNAgent   # TensorFlow is only imported when RL is used
+    if actions is not None and not getattr(actions, 'has_workers', True):
+        return {}
     n_actions = actions.n_actions if actions is not None else network.max_greens
     dim = observer.dim + (actions.extra_dim if actions is not None else 0)
     if agent_cfg.shared:
@@ -125,15 +133,28 @@ class RLController(Controller):
         return np.concatenate([s, extra]).astype(np.float32) if len(extra) else s
 
     def act(self, sim, tl_id):
+        if not self.agents:                    # no junction agents (hierarchy, worker 'off')
+            return self.actions.stage(sim, tl_id, 0)
         if self.actions.decides(sim, tl_id) or tl_id not in self.last:
             s = self.state(sim, tl_id)
             self.last[tl_id] = self.agents[tl_id].act(s, self.actions.mask(sim, tl_id),
                                                       self.epsilon)
         return self.actions.stage(sim, tl_id, self.last[tl_id])
 
+    def learners(self):
+        """Every network of the policy: {name: agent} (junction agents, manager)."""
+        named = dict(self.agents)
+        if hasattr(self.actions, 'learners'):
+            named.update(self.actions.learners())
+        return named
+
+    def save(self, run_dir, which):
+        for name, agent in self.learners().items():
+            agent.save(weights_path(run_dir, which, name))
+
     def load(self, run_dir, which='best'):
-        for tl_id, agent in self.agents.items():
-            agent.load(weights_path(run_dir, which, tl_id))
+        for name, agent in self.learners().items():
+            agent.load(weights_path(run_dir, which, name))
         return self
 
 

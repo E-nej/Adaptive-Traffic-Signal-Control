@@ -69,7 +69,8 @@ def make_fixed(network, cfg, assignment):
     s, o = cfg.signals, cfg.observation
     return FixedSelection(network, assignment, default=DEFAULT, interval=s.decision_interval,
                           max_extension=s.max_extension, noise=o.noise, dropout=o.dropout,
-                          e2_length=o.e2_length, experts=s.experts)
+                          e2_length=o.e2_length, experts=s.experts,
+                          actuated_loops=s.actuated_loops)
 
 
 def assign(cfg, out_dir=None, workers=None, passes=2):

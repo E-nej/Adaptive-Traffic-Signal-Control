@@ -1,0 +1,28 @@
+# The Python actuated expert with its loops where SUMO puts them (2 s of travel upstream).
+#   tsc evaluate configs/maribor/actuated_py_upstream.toml
+name = "maribor_actuated_py_upstream"
+workers = 6
+
+[network]
+path = "networks/maribor/titova.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.2
+tidal_share = 0.7
+tidal_axis = [0.0, 1.0]
+tidal_random = true
+min_distance = 300.0
+
+[signals]
+actuated_loops = "upstream"
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[evaluate]
+baselines = ["actuated_py"]
+levels = [2000, 4000, 6000, 7000, 8000]
+n_seeds = 10
