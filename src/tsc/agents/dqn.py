@@ -183,16 +183,16 @@ class DQNAgent:
             return None
         batch = random.sample(self.buffer, self.batch_size)
         s, a, r, s2, m2, d = (np.array(x) for x in zip(*batch))
-        loss = self._train_step(
-            tf.convert_to_tensor(s, tf.float32), tf.convert_to_tensor(a, tf.int32),
-            tf.convert_to_tensor(r, tf.float32), tf.convert_to_tensor(s2, tf.float32),
-            tf.convert_to_tensor(m2, tf.bool), tf.convert_to_tensor(d, tf.float32),
-        )
+        args = (s.astype(np.float32, copy=False), a.astype(np.int32), r.astype(np.float32),
+                s2.astype(np.float32, copy=False), m2.astype(bool, copy=False),
+                d.astype(np.float32))
         self.grad_steps += 1
         if self.target_update == 'soft':
-            self._soft_update()
-        elif self.grad_steps % self.hard_every == 0:
-            self.q_target.set_weights(self.q.get_weights())
+            loss = self._train_step_soft(*args)       # gradient step + Polyak update, one call
+        else:
+            loss = self._train_step(*args)
+            if self.grad_steps % self.hard_every == 0:
+                self.q_target.set_weights(self.q.get_weights())
         return float(loss)
 
     # ------------------------------------------------------------------
@@ -203,6 +203,16 @@ class DQNAgent:
 
     @tf.function
     def _train_step(self, s, a, r, s2, m2, d):
+        return self._train(s, a, r, s2, m2, d)
+
+    @tf.function
+    def _train_step_soft(self, s, a, r, s2, m2, d):
+        loss = self._train(s, a, r, s2, m2, d)
+        self._polyak()
+        return loss
+
+    def _train(self, s, a, r, s2, m2, d):
+        """One Double/plain DQN gradient step (traced inside the tf.functions above)."""
         neg_inf = tf.fill(tf.shape(m2), -1e9)
         q_next_target = self.q_target(s2, training=False)
         if self.double:
@@ -219,8 +229,7 @@ class DQNAgent:
         self.opt.apply_gradients(zip(grads, self.q.trainable_variables))
         return loss
 
-    @tf.function
-    def _soft_update(self):
+    def _polyak(self):
         for t, w in zip(self.q_target.trainable_variables, self.q.trainable_variables):
             t.assign(self.tau * w + (1.0 - self.tau) * t)
 
