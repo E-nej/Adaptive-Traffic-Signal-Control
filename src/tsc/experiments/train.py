@@ -304,6 +304,7 @@ def train_one(cfg, out_dir):
     library = load_library(network, cfg) if cfg.signals.control in PLAN_CONTROLS else None
     plan_rng = np.random.default_rng(seed + 31337)      # separate stream: plan choice
     scale = cfg.reward.scale
+    smdp, gamma = cfg.agent.smdp, cfg.agent.gamma
 
     log_path = os.path.join(out_dir, 'train_log.csv')
     log = log_file = None
@@ -363,8 +364,12 @@ def train_one(cfg, out_dir):
                     mask = actions.mask(sim, tl_id)
                     if tl_id in pending:
                         ps, pa = pending[tl_id]
-                        r = scale * acc[tl_id][0] / max(1, acc[tl_id][1])
-                        agent.store(ps, pa, r, s, mask)
+                        total, secs = acc[tl_id]
+                        if smdp:        # discounted sum over the decision's seconds
+                            r, discount = scale * total, gamma ** secs
+                        else:           # mean per second, one discount per decision
+                            r, discount = scale * total / max(1, secs), None
+                        agent.store(ps, pa, r, s, mask, discount)
                         rewards.append(r)
                         loss = agent.replay()
                         if loss is not None:
@@ -378,7 +383,7 @@ def train_one(cfg, out_dir):
             observer.tick(sim)
             actions.tick(sim)
             for tl_id, r in reward_fn.all(sim).items():
-                acc[tl_id][0] += r
+                acc[tl_id][0] += r * (gamma ** acc[tl_id][1] if smdp else 1.0)
                 acc[tl_id][1] += 1
 
         m = sim.close()

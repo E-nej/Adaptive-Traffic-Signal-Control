@@ -124,6 +124,9 @@ class ObservationConfig:
     noise: float = 0.0                # detector noise (std, normalised units)
     dropout: float = 0.0              # probability a detector reading fails
     e2_length: float = 50.0           # m, area detector length before the stop line
+    approach_length: float = 0.0      # m, detector mode: a second area detector this long;
+                                      # adds the vehicles moving toward the stop line per
+                                      # lane (0 = off; ~ speed limit x decision interval)
 
 
 @dataclass
@@ -146,6 +149,9 @@ class AgentConfig:
     learn_start: int = 500
     hidden: list[int] = field(default_factory=lambda: [400, 400])
     shared: bool = False              # one network for all junctions (+ junction one-hot)
+    smdp: bool = False                # time-based discounting: the reward is the discounted
+                                      # sum over the decision's seconds, the next value is
+                                      # discounted by gamma ** seconds (gamma per second)
 
 
 @dataclass

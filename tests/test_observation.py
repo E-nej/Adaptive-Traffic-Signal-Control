@@ -137,3 +137,35 @@ def test_cooperative_reward(test5):
     for tl in test5.tl_ids:
         expected = local[tl] + 0.5 * sum(local[n] for n in test5.neighbours[tl])
         assert abs(coop[tl] - expected) < 1e-12
+
+
+def test_approach_detector_feature(test5):
+    """approach_length > 0 adds one feature per lane: vehicles moving toward the stop line
+    in the longer area detector (count minus jam), normalised by its capacity."""
+    tl = test5.tl_ids[0]
+    obs = Observer(test5, mode='detector', comm=False, approach_length=150.0)
+    plain = Observer(test5, mode='detector', comm=False)
+    assert obs.dim == plain.dim + test5.max_in_lanes
+    sim = fake_sim(test5, halting=2)
+    sim.api.lanearea.getLastStepVehicleNumber = lambda d: 7 if d.startswith('e2a_') else 3
+    s = obs.observe(sim, tl)
+    lane = test5.in_lanes[tl][0]
+    per_lane = s[:test5.max_in_lanes * (DET_FEATS + 1)].reshape(test5.max_in_lanes, DET_FEATS + 1)
+    assert per_lane[0, -1] == pytest.approx((7 - 2) / obs.a_cap[lane])
+    assert np.array_equal(per_lane[0, :DET_FEATS], plain.observe(sim, tl)[:DET_FEATS])
+
+
+def test_smdp_discount_is_used():
+    """A transition's own discount replaces gamma in the target (SMDP: gamma ** seconds)."""
+    import tensorflow as tf  # noqa: F401
+    from tsc.agents.dqn import DQNAgent
+    agent = DQNAgent(2, 2, gamma=0.9, lr=0.01, batch_size=1, learn_start=1, hidden=(8,))
+    s = np.array([1.0, 0.0], dtype=np.float32)
+    mask = np.array([True, True])
+    agent.store(s, 0, 1.0, s, mask)
+    assert agent.buffer[-1][5] == 0.9                     # default: gamma per decision
+    agent.buffer.clear()
+    agent.store(s, 0, 1.0, s, mask, discount=0.0)         # terminal-like: target = r
+    for _ in range(400):
+        agent.replay()
+    assert agent.q_values(s)[0] == pytest.approx(1.0, abs=0.1)

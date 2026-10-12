@@ -74,18 +74,19 @@ class DQNAgent:
         q[~mask] = -np.inf
         return int(np.argmax(q))
 
-    def store(self, s, a, r, s2, mask2):
-        self.buffer.append((s, a, r, s2, mask2))
+    def store(self, s, a, r, s2, mask2, discount=None):
+        """discount: of the next state's value (default gamma; SMDP: gamma ** seconds)."""
+        self.buffer.append((s, a, r, s2, mask2, self.gamma if discount is None else discount))
 
     def replay(self):
         if len(self.buffer) < self.learn_start:
             return None
         batch = random.sample(self.buffer, self.batch_size)
-        s, a, r, s2, m2 = (np.array(x) for x in zip(*batch))
+        s, a, r, s2, m2, d = (np.array(x) for x in zip(*batch))
         loss = self._train_step(
             tf.convert_to_tensor(s, tf.float32), tf.convert_to_tensor(a, tf.int32),
             tf.convert_to_tensor(r, tf.float32), tf.convert_to_tensor(s2, tf.float32),
-            tf.convert_to_tensor(m2, tf.bool),
+            tf.convert_to_tensor(m2, tf.bool), tf.convert_to_tensor(d, tf.float32),
         )
         self.grad_steps += 1
         if self.target_update == 'soft':
@@ -101,7 +102,7 @@ class DQNAgent:
         return self.q(x, training=False)
 
     @tf.function
-    def _train_step(self, s, a, r, s2, m2):
+    def _train_step(self, s, a, r, s2, m2, d):
         neg_inf = tf.fill(tf.shape(m2), -1e9)
         q_next_target = self.q_target(s2, training=False)
         if self.double:
@@ -110,7 +111,7 @@ class DQNAgent:
             next_v = tf.gather(q_next_target, best, axis=1, batch_dims=1)
         else:
             next_v = tf.reduce_max(tf.where(m2, q_next_target, neg_inf), axis=1)
-        target = tf.stop_gradient(r + self.gamma * next_v)
+        target = tf.stop_gradient(r + d * next_v)
         with tf.GradientTape() as tape:
             q_sa = tf.gather(self.q(s, training=True), a, axis=1, batch_dims=1)
             loss = self.huber(target, q_sa)

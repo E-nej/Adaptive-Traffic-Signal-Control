@@ -20,7 +20,7 @@ TLS_MODES = ('fixed', 'webster', 'actuated', 'python')
 class Simulation:
     def __init__(self, network, route_file, duration, out_dir, seed=0, tls='python',
                  additional=None, gui=False, decision_interval=5, max_green=None, max_red=None,
-                 e2_length=50.0, begin=0, undeparted=False):
+                 e2_length=50.0, begin=0, undeparted=False, approach_length=0.0):
         if tls not in TLS_MODES:
             raise ValueError(f'Unknown tls mode: {tls!r}')
         self.network = network
@@ -54,7 +54,7 @@ class Simulation:
         ]
         additional = list(additional or [])
         if tls == 'python':
-            additional.append(detector_file(network, e2_length))
+            additional.append(detector_file(network, e2_length, approach_length))
         if additional:
             self.cmd += ['-a', ','.join(additional)]
         self._head_args = dict(yellow=network.yellow, all_red=network.all_red,
