@@ -1,0 +1,32 @@
+# Benchmark grid4x4 (RESCO, CoSLight "Grid 4x4"): synthetic 4x4 grid, 1 h, one of ~1400 route files per episode.
+# The scenario's own signal programs and timing as in RESCO: 3 s yellow, a decision every 10 s.
+#   uv run python networks/benchmarks/fetch.py grid4x4
+#   tsc evaluate configs/benchmarks/grid4x4.toml
+name = "bench_grid4x4"
+workers = 12
+
+[network]
+path = "networks/benchmarks/grid4x4/grid4x4.net.xml"
+rebuild_tls = false      # the scenario's own programs (its fixed-time baseline)
+yellow = 3
+all_red = 0
+min_green = 7
+
+[demand]
+generator = "file"
+route_files = ["networks/benchmarks/grid4x4/grid4x4_*.rou.xml"]
+eval_files = 100          # the last 100 route files: evaluation only
+begin = 0
+duration = 3600
+count_undeparted = true  # as RESCO: vehicles still waiting to enter count in the delay
+
+[signals]
+decision_interval = 10
+
+[observation]
+mode = "detector"
+
+[evaluate]
+baselines = ["fixed", "maxpressure", "maxpressure_det"]
+levels = [1]             # the demand is the scenario's own (no demand levels)
+n_seeds = 10

@@ -1,0 +1,31 @@
+# Benchmark cologne8 (RESCO, CoSLight): Cologne, region of 8 signals, 07:00-08:00, calibrated demand (TAPAS Cologne).
+# The scenario's own signal programs and timing as in RESCO: 3 s yellow, a decision every 10 s.
+#   uv run python networks/benchmarks/fetch.py cologne8
+#   tsc evaluate configs/benchmarks/cologne8.toml
+name = "bench_cologne8"
+workers = 12
+
+[network]
+path = "networks/benchmarks/cologne8/cologne8.net.xml"
+rebuild_tls = false      # the scenario's own programs (its fixed-time baseline)
+yellow = 3
+all_red = 0
+min_green = 7
+
+[demand]
+generator = "file"
+route_files = ["networks/benchmarks/cologne8/cologne8.rou.xml"]
+begin = 25200
+duration = 3600
+count_undeparted = true  # as RESCO: vehicles still waiting to enter count in the delay
+
+[signals]
+decision_interval = 10
+
+[observation]
+mode = "detector"
+
+[evaluate]
+baselines = ["fixed", "maxpressure", "maxpressure_det"]
+levels = [1]             # the demand is the scenario's own (no demand levels)
+n_seeds = 10
