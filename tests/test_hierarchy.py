@@ -405,3 +405,39 @@ def test_expert_workers(corridor, work_root):
     assert policy.agents[tl].act(state, mask) == worker.act(state, mask)
     with pytest.raises(ValueError, match='expert'):
         train_one(config_mod.replace(tcfg, hierarchy={'manager': 'learned'}), run + '_x')
+
+
+def test_advanced_maxpressure_rule(corridor):
+    """Advanced-MP keeps the green while weight x vehicles still moving toward the stop line
+    (within range) >= the highest efficient pressure, else takes the highest-pressure stage."""
+    from types import SimpleNamespace
+    from tsc.controllers.maxpressure import AdvancedMaxPressure
+    from tsc.network import lane_edge
+    tl = corridor.tl_ids[0]
+    links = corridor.links[tl]
+    served = [{l for i, l, _ in links if g[i] in 'Gg'} for g in corridor.greens[tl]]
+    other = next(s for s in range(1, len(served)) if served[s] - served[0])
+    queued = sorted(served[other] - served[0])[0]          # a lane only stage `other` serves
+    length = corridor.lane_length[queued]
+    moving = sorted(served[0])[0]
+
+    def api(halting, near):
+        lane = SimpleNamespace(
+            getLastStepHaltingNumber=lambda l: halting.get(l, 0),
+            getLastStepVehicleIDs=lambda l: [f'v{k}' for k in range(near)] if l == moving else [])
+        edge = SimpleNamespace(getLaneNumber=lambda e: 1, getLastStepHaltingNumber=lambda e: 0)
+        pos = corridor.lane_length[moving] - 30.0                  # 30 m before the stop line
+        vehicle = SimpleNamespace(getSpeed=lambda v: 5.0, getLanePosition=lambda v: pos)
+        return SimpleNamespace(lane=lane, edge=edge, vehicle=vehicle)
+
+    sim = SimpleNamespace(network=corridor, heads={tl: SimpleNamespace(stage=0)})
+    amp = AdvancedMaxPressure(weight=1.0, effective_range=100.0)
+    amp.reset(sim)
+    sim.api = api({queued: 6}, near=10)       # 10 moving on stage 0 >= pressure 6: keep
+    assert amp.act(sim, tl) == 0
+    sim.api = api({queued: 12}, near=10)      # pressure 12 > 10: switch
+    assert amp.act(sim, tl) != 0
+    amp.effective_range = 20.0                # the moving vehicles are out of range: switch
+    sim.api = api({queued: 6}, near=10)
+    assert amp.act(sim, tl) != 0
+    assert length > 0 and lane_edge(queued)

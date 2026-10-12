@@ -9,6 +9,9 @@ actuated        : SUMO's gap-based actuated control
 maxpressure     : max-pressure on whole-lane counts (perfect information), Python-controlled
 maxpressure_det : max-pressure on the E2 detectors only, with the noise / dropout of the
                   experiment's [observation] section (same sensors as RL in step 2)
+advanced_mp     : Advanced-MP (Zhang et al. 2022): efficient pressure, keeps the green while
+                  enough vehicles are still moving toward the stop line ([signals] amp_weight,
+                  amp_range); perfect information
 greenwave_py    : the green-wave plan replayed by Python (SignalHead), the reference for
                   plan-controlled RL (same switching mechanics)
 plan_actuated   : coordinated-actuated control on the green-wave plan (gap-based extension,
@@ -23,7 +26,7 @@ RL policies (controllers.rl) are Python-controlled as well.
 """
 
 from tsc.controllers.base import Controller
-from tsc.controllers.maxpressure import DetectorMaxPressure, MaxPressure
+from tsc.controllers.maxpressure import AdvancedMaxPressure, DetectorMaxPressure, MaxPressure
 from tsc.controllers.plan import PlanActuated, PlanController
 
 
@@ -52,6 +55,8 @@ BASELINES = {
     'actuated': ('actuated', None),
     'maxpressure': ('python', lambda cfg, network: MaxPressure()),
     'maxpressure_det': ('python', _detector_maxpressure),
+    'advanced_mp': ('python', lambda cfg, network: AdvancedMaxPressure(
+        weight=cfg.signals.amp_weight, effective_range=cfg.signals.amp_range)),
     'greenwave_py': ('python', _plan(PlanController)),
     'plan_actuated': ('python', _plan(PlanActuated)),
     'select_assigned': ('python', None),       # built by evaluate (needs the assignment)

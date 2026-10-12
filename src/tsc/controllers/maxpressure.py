@@ -134,3 +134,65 @@ class DetectorMaxPressure(MaxPressure):
         if self.noise:
             n = max(0.0, n + self.rng.normal(0.0, self.noise * self.e2_cap[lane]))
         return n
+
+
+class AdvancedMaxPressure(MaxPressure):
+    """Advanced-MP (Zhang et al., ICML 2022, "Expression might be enough"), on any junction.
+
+    Efficient pressure of an incoming lane in a stage: its halting vehicles minus the mean
+    halting vehicles per lane of the outgoing roads it feeds in that stage (averaged over
+    those roads: a shared lane's queue counts once, as one lane per movement in the paper);
+    a stage's pressure is the sum over the lanes it serves.  The stage's demand is the
+    number of vehicles still moving (> 0.1 m/s) within `effective_range` m of the stop
+    line on the incoming lanes it serves, i.e. those that can still pass in this green.
+    Keep the current stage while weight × its demand >= the highest stage pressure, else
+    switch to the stage with the highest pressure (as the authors' code, W = 1 and a
+    100 m range by default).  Perfect information, like `MaxPressure`.
+    """
+
+    def __init__(self, weight=1.0, effective_range=100.0):
+        self.weight = weight
+        self.effective_range = effective_range
+
+    def reset(self, sim):
+        super().reset(sim)
+        net = sim.network
+        self.stage_moves = {}
+        for tl_id in net.tl_ids:
+            per_stage = []
+            for state in net.greens[tl_id]:
+                moves = {(in_lane, lane_edge(out_lane))
+                         for idx, in_lane, out_lane in net.links[tl_id] if state[idx] in 'Gg'}
+                per_stage.append(sorted(moves))
+            self.stage_moves[tl_id] = per_stage
+
+    def _running_near(self, sim, lane):
+        api, length = sim.api, sim.network.lane_length[lane]
+        return sum(1 for v in api.lane.getLastStepVehicleIDs(lane)
+                   if api.vehicle.getSpeed(v) > 0.1
+                   and length - api.vehicle.getLanePosition(v) <= self.effective_range)
+
+    def act(self, sim, tl_id):
+        api = sim.api
+        halting, out_mean, running = {}, {}, {}
+        pressures, demands = [], []
+        for moves in self.stage_moves[tl_id]:
+            feeds = {}                                  # incoming lane -> outgoing roads
+            for in_lane, out_edge in moves:
+                feeds.setdefault(in_lane, []).append(out_edge)
+                if out_edge not in out_mean:
+                    n = api.edge.getLaneNumber(out_edge)
+                    out_mean[out_edge] = api.edge.getLastStepHaltingNumber(out_edge) / max(1, n)
+            p = 0.0
+            for lane, outs in feeds.items():
+                if lane not in halting:
+                    halting[lane] = api.lane.getLastStepHaltingNumber(lane)
+                    running[lane] = self._running_near(sim, lane)
+                p += halting[lane] - np.mean([out_mean[e] for e in outs])
+            pressures.append(p)
+            demands.append(sum(running[l] for l in feeds))
+        current = sim.heads[tl_id].stage
+        best = max(range(len(pressures)), key=lambda i: pressures[i])
+        if self.weight * demands[current] >= pressures[best]:
+            return current
+        return best
