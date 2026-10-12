@@ -1,0 +1,53 @@
+# Step 2H.5: worker for the maxpressure expert on the maribor, trained with that expert always
+# active (experts set up exactly as their baselines: no max-red shield, no hold guard).
+# Starts from the expert alone and keeps the worker only if it beats it on fresh scenarios.
+#   tsc train configs/hierarchy/workers/maribor_maxpressure.toml --seeds 0-2
+name = "wk_maribor_maxpressure"
+workers = 3
+
+[network]
+path = "networks/maribor/titova.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.2
+tidal_share = 0.7
+tidal_axis = [0.0, 1.0]
+tidal_random = true
+min_distance = 300.0
+
+[signals]
+control = "hierarchy"
+decision_interval = 5    # workers decide every 5 s of green; the expert acts every second
+max_extension = 20
+experts = ["greenwave", "coord_actuated", "maxpressure", "actuated"]
+actuated_loops = "sumo"
+
+[hierarchy]
+scope = "network"
+manager = "fixed"
+fixed_expert = 2    # maxpressure
+worker = "residual"
+accept_scenarios = 4
+
+[observation]
+mode = "detector"
+comm = true
+message = "directional"
+noise = 0.05
+dropout = 0.02
+
+[reward]                 # workers: the evaluated delay + half the neighbours'
+kind = "delay"
+neighbour_weight = 0.5
+
+[agent]                  # one shared network for all junctions
+shared = true
+
+[train]
+level_min = 2000.0
+level_max = 8000.0
+val_levels = [3000.0, 6000.0, 8000.0]
+plan_levels = [2000.0, 4000.0, 6000.0, 7000.0, 8000.0]
+plan_match = 0.5
+episodes = 300
