@@ -71,6 +71,8 @@ class SignalConfig:
                                       # 'upstream' (where SUMO's actuated control has them)
     max_green: int | None = None      # s, safety shield (None = off)
     max_red: int | None = None        # s, safety shield (None = off)
+    amp_weight: float = 1.0           # advanced_mp: keep the green while weight x moving
+    amp_range: float = 100.0          # vehicles within amp_range m >= the highest pressure
 
 
 @dataclass

@@ -26,6 +26,6 @@ decision_interval = 10
 mode = "detector"
 
 [evaluate]
-baselines = ["fixed", "maxpressure", "maxpressure_det"]
+baselines = ["fixed", "maxpressure", "maxpressure_det", "advanced_mp"]
 levels = [1]             # the demand is the scenario's own (no demand levels)
 n_seeds = 10
