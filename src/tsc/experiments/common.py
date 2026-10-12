@@ -3,7 +3,10 @@
 import datetime
 import json
 import os
+import platform
+import socket
 import subprocess
+import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import tsc
@@ -44,6 +47,58 @@ def save_run_info(cfg, out_dir):
     }
     with open(os.path.join(out_dir, 'run_info.json'), 'w') as f:
         json.dump(info, f, indent=2)
+
+
+def software_stack():
+    """Versions and hardware that can change numerical results (recorded with parity manifests).
+
+    TensorFlow's build info is only included when TensorFlow is already imported: importing it
+    here could shift the RNG streams of a run that has not seeded yet.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+    packages = {}
+    for pkg in ('tensorflow', 'tensorflow-rocm', 'keras', 'numpy', 'eclipse-sumo', 'libsumo'):
+        try:
+            packages[pkg] = version(pkg)
+        except PackageNotFoundError:
+            pass
+    info = {
+        'hostname': socket.gethostname(),
+        'platform': platform.platform(),
+        'python': platform.python_version(),
+        'cpu': _cpu_model(),
+        'cpu_flags': _cpu_flags(),
+        'packages': packages,
+        'env': {k: os.environ[k] for k in ('TSC_TF_THREADS', 'TF_ENABLE_ONEDNN_OPTS', 'ONEDNN_MAX_CPU_ISA',
+                                           'CUDA_VISIBLE_DEVICES', 'HIP_VISIBLE_DEVICES')
+                if k in os.environ},
+    }
+    if 'tensorflow' in sys.modules:
+        tf = sys.modules['tensorflow']
+        info['tf_build'] = {k: str(v) for k, v in tf.sysconfig.get_build_info().items()}
+    return info
+
+
+def _cpuinfo_field(name):
+    try:
+        with open('/proc/cpuinfo') as f:
+            for line in f:
+                if line.startswith(name):
+                    return line.split(':', 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
+
+def _cpu_model():
+    return _cpuinfo_field('model name') or platform.processor() or None
+
+
+def _cpu_flags():
+    """The SIMD extensions that decide which oneDNN/Eigen kernels run."""
+    flags = set((_cpuinfo_field('flags') or '').split())
+    return sorted(f for f in ('sse4_2', 'avx', 'avx2', 'fma', 'avx512f', 'avx512_bf16', 'avx512_vnni',
+                              'amx_tile') if f in flags)
 
 
 def _git_commit():

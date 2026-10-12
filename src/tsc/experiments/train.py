@@ -290,8 +290,12 @@ def load_library(network, cfg):
     return {key: load_plans(path, network) for key, path in plan_library(network, cfg).items()}
 
 
-def train_one(cfg, out_dir):
-    """Train one run; cfg.train.seeds must hold exactly one seed."""
+def train_one(cfg, out_dir, on_episode_end=None):
+    """Train one run; cfg.train.seeds must hold exactly one seed.
+
+    on_episode_end(ep, info), if given, is called after every episode with the state
+    the parity harness inspects (tsc.experiments.parity).  It must not consume RNG.
+    """
     (seed,) = cfg.train.seeds
     seeds_mod.check_train_seed(seed)
     tc = cfg.train
@@ -410,12 +414,14 @@ def train_one(cfg, out_dir):
         if hasattr(actions, 'episode_stats'):
             row.update(actions.episode_stats())
 
+        improved = False
         if (ep + 1) % tc.val_every == 0 or ep == tc.episodes - 1:
             if set_training:
                 set_training(False, 0.0)
             val = validate(network, cfg, greedy, work_dir, library)
             row['val_delay'] = val
             if val < best_val:
+                improved = True
                 best_val = val
                 greedy.save(out_dir, 'best')
         row['seconds'] = round(time.time() - t0, 1)
@@ -431,6 +437,10 @@ def train_one(cfg, out_dir):
               f"delay {m['delay']:7.1f} thr {m['throughput']:.2f} "
               f"{'val %.1f ' % row['val_delay'] if 'val_delay' in row else ''}({row['seconds']}s)",
               flush=True)
+        if on_episode_end is not None:
+            on_episode_end(ep, {'row': row, 'improved': improved, 'agents': agents, 'route': route,
+                                'rngs': {'trainer': rng, 'observer': observer.rng,
+                                         'observer_messages': observer.message_rng}})
 
     greedy.save(out_dir, 'final')
     if log_file is not None:

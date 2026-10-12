@@ -7,12 +7,14 @@
     tsc compare outputs/eval/baselines/results.csv outputs/eval/step1/results.csv --ref maxpressure
     tsc diagnose messages configs/step2/evaluate.toml --runs "outputs/train/step2_full/s*"
     tsc accept "outputs/train/hier2_corridor_network/s*" --scenarios 6
+    tsc parity record configs/step1/full.toml      (then, after a change: tsc parity check ...)
 
 Any config value can be overridden with --set section.key=value (TOML syntax),
 e.g. --set observation.noise=0.1 --set name=full_noise
 """
 
 import argparse
+import os
 import sys
 
 from tsc import config as config_mod
@@ -94,6 +96,37 @@ def cmd_diagnose(args):
     getattr(diagnose, args.what)(cfg, out_dir=args.out)
 
 
+def _parity_config(args):
+    from tsc.experiments import parity
+    cfg = parity.short_config(_load(args), args.episodes, args.val_every, args.seed)
+    return cfg, args.out or parity.parity_root(cfg)
+
+
+def cmd_parity_record(args):
+    from tsc.experiments import parity
+    cfg, root = _parity_config(args)
+    out = os.path.join(root, args.label)
+    parity.record(cfg, out)
+    print(f'recorded {os.path.join(out, parity.MANIFEST)}')
+
+
+def cmd_parity_check(args):
+    from tsc.experiments import parity
+    cfg, root = _parity_config(args)
+    golden = parity.load(os.path.join(root, args.against))
+    out = os.path.join(root, args.label)
+    current = parity.record(cfg, out)
+    print(parity.report(parity.compare(golden, current), args.against, args.label))
+    return 0 if not parity.compare(golden, current) else 1
+
+
+def cmd_parity_compare(args):
+    from tsc.experiments import parity
+    diffs = parity.compare(parity.load(args.a), parity.load(args.b))
+    print(parity.report(diffs, 'a', 'b'))
+    return 0 if not diffs else 1
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog='tsc', description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -146,12 +179,34 @@ def build_parser():
     with_config(d)
     d.add_argument('--runs', nargs='*', help='trained run directories (globs ok)')
     d.set_defaults(func=cmd_diagnose)
+
+    pa = sub.add_parser('parity', help='record / check bit-exact fingerprints of a short training run')
+    pa_sub = pa.add_subparsers(dest='action', required=True)
+
+    def with_parity(sp, label):
+        with_config(sp)
+        sp.add_argument('--label', default=label, help=f'name of this recording (default: {label})')
+        sp.add_argument('--episodes', type=int, default=6)
+        sp.add_argument('--val-every', type=int, default=2)
+        sp.add_argument('--seed', type=int, default=0)
+
+    pr = pa_sub.add_parser('record', help='train a short run and record its manifest')
+    with_parity(pr, 'golden')
+    pr.set_defaults(func=cmd_parity_record)
+    pc = pa_sub.add_parser('check', help='record again and compare with an earlier recording')
+    with_parity(pc, 'check')
+    pc.add_argument('--against', default='golden', help='recording to compare with (default: golden)')
+    pc.set_defaults(func=cmd_parity_check)
+    pm = pa_sub.add_parser('compare', help='compare two recordings (directories or manifest files)')
+    pm.add_argument('a')
+    pm.add_argument('b')
+    pm.set_defaults(func=cmd_parity_compare)
     return p
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    args.func(args)
+    return args.func(args)
 
 
 if __name__ == '__main__':
