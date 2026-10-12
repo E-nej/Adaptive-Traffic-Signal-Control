@@ -11,10 +11,12 @@ Output per training seed: <out>/s<seed>/ with config.toml, run_info.json,
 train_log.csv and the weights.
 """
 
+import copy
 import csv
 import os
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -362,6 +364,15 @@ def train_one(cfg, out_dir, on_episode_end=None):
     elif fallback == 'workers':
         best_val = _worker_baseline(cfg, network, greedy, work_dir, library, out_dir, label)
 
+    # The next episode's routes are generated in the background (a SUMO subprocess) while
+    # this episode runs.  Its level is peeked from a copy of `rng`, so the draws from `rng`
+    # itself happen exactly as before; two route files alternate.
+    prefetch = ThreadPoolExecutor(max_workers=1)
+    next_route = None
+
+    def route_file(ep):
+        return os.path.join(work_dir, f'train_{"ab"[ep % 2]}.rou.xml')
+
     for ep in range(tc.episodes):
         t0 = time.time()
         epsilon = max(tc.eps_min, tc.eps_start - (tc.eps_start - tc.eps_min) * ep / eps_end_ep)
@@ -369,8 +380,18 @@ def train_one(cfg, out_dir, on_episode_end=None):
             set_training(True, epsilon)
         level = float(rng.uniform(tc.level_min, tc.level_max))
         route_seed = seeds_mod.train(seed, ep)
-        route = generate_routes(network, cfg.demand, os.path.join(work_dir, 'train.rou.xml'),
-                                route_seed, level)
+        if next_route is None:
+            route = generate_routes(network, cfg.demand, route_file(ep), route_seed, level)
+        else:
+            next_level, future = next_route
+            assert next_level == level, 'prefetched level differs from the drawn one'
+            route = future.result()
+        next_route = None
+        if ep + 1 < tc.episodes:
+            next_level = float(copy.deepcopy(rng).uniform(tc.level_min, tc.level_max))
+            next_route = (next_level, prefetch.submit(
+                generate_routes, network, cfg.demand, route_file(ep + 1),
+                seeds_mod.train(seed, ep + 1), next_level))
 
         if library is not None:
             flip = scenario_flip(cfg.demand, route_seed) if is_directional(cfg.demand) else None
@@ -460,6 +481,7 @@ def train_one(cfg, out_dir, on_episode_end=None):
                                 'rngs': {'trainer': rng, 'observer': observer.rng,
                                          'observer_messages': observer.message_rng}})
 
+    prefetch.shutdown()
     greedy.save(out_dir, 'final')
     if log_file is not None:
         log_file.close()
