@@ -23,3 +23,6 @@ paper/**/*.out
 paper/**/*.synctex.gz
 paper/**/*.toc
 paper/**/*.pdf
+
+# third-party benchmark scenarios (networks/benchmarks/fetch.py downloads them)
+networks/benchmarks/*/
