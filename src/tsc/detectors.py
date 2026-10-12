@@ -2,7 +2,9 @@
 
 Every incoming lane of a signalised junction gets an E2 area detector
 (camera/radar-like) on its last `e2_length` metres and an E1 induction loop
-at the stop line.  Detector ids: `e2_<lane>`, `e1_<lane>`.
+at the stop line.  Detector ids: `e2_<lane>`, `e1_<lane>`.  A second loop `e1u_<lane>`
+sits where SUMO's actuated control puts its loops (UPSTREAM_GAP s of travel at the
+speed limit before the stop line, at most the lane's start).
 
 A lane shorter than `e2_length` (common in OpenStreetMap networks, where a road
 is split at every merge or lane change near an intersection) gets a multi-lane
@@ -13,6 +15,7 @@ watching the approach would, but not back through another signal.
 import os
 
 VEH_SPACE = 7.5            # m per queued vehicle (length + gap)
+UPSTREAM_GAP = 2.0         # s, SUMO's default 'detector-gap' of actuated signals
 
 
 def e2_id(lane):
@@ -21,6 +24,10 @@ def e2_id(lane):
 
 def e1_id(lane):
     return f'e1_{lane}'
+
+
+def e1u_id(lane):
+    return f'e1u_{lane}'
 
 
 def e2_span(network, lane, e2_length=50.0):
@@ -63,7 +70,7 @@ def e2_capacity(network, lane, e2_length=50.0):
 
 def detector_file(network, e2_length=50.0):
     """Write (once) and return the additional file with the detectors of `network`."""
-    path = os.path.join(network.work_dir, f'detectors_{int(e2_length)}.add.xml')
+    path = os.path.join(network.work_dir, f'detectors_{int(e2_length)}_v2.add.xml')
     if os.path.exists(path):
         return path
     lines = ['<additional>']
@@ -78,6 +85,10 @@ def detector_file(network, e2_length=50.0):
                 f'endPos="{length:.2f}" freq="3600" file="NUL"/>')
             lines.append(
                 f'    <inductionLoop id="{e1_id(lane)}" lane="{lane}" pos="{max(0.0, length - 1.0):.2f}" '
+                f'freq="3600" file="NUL"/>')
+            upstream = max(0.0, length - UPSTREAM_GAP * network.lane_speed[lane])
+            lines.append(
+                f'    <inductionLoop id="{e1u_id(lane)}" lane="{lane}" pos="{upstream:.2f}" '
                 f'freq="3600" file="NUL"/>')
     lines.append('</additional>')
     tmp = f'{path}.{os.getpid()}.tmp'   # parallel runs may build it at the same time

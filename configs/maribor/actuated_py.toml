@@ -1,0 +1,25 @@
+# Is the selector's 'actuated' expert (Python GapActuated) as good as SUMO's actuated control?
+#   tsc evaluate configs/maribor/actuated_py.toml
+name = "maribor_actuated_py"
+workers = 6
+
+[network]
+path = "networks/maribor/titova.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.2
+tidal_share = 0.7
+tidal_axis = [0.0, 1.0]
+tidal_random = true
+min_distance = 300.0
+
+[observation]
+mode = "detector"
+noise = 0.05
+dropout = 0.02
+
+[evaluate]
+baselines = ["actuated", "actuated_py"]
+levels = [2000, 4000, 6000, 7000, 8000]
+n_seeds = 10

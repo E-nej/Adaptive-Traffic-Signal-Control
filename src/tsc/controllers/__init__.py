@@ -15,6 +15,9 @@ plan_actuated   : coordinated-actuated control on the green-wave plan (gap-based
                   early end of empty greens; controllers.plan)
 select_assigned : best fixed controller per junction and demand level (`tsc assign`,
                   controllers.select.FixedSelection)
+actuated_py     : the Python copy of SUMO's actuated control that the selector uses as its
+                  'actuated' expert (controllers.select.GapActuated), to check it against
+                  the SUMO original
 
 RL policies (controllers.rl) are Python-controlled as well.
 """
@@ -27,6 +30,11 @@ from tsc.controllers.plan import PlanActuated, PlanController
 def _detector_maxpressure(cfg, network):
     o = cfg.observation
     return DetectorMaxPressure(noise=o.noise, dropout=o.dropout, e2_length=o.e2_length)
+
+
+def _gap_actuated(cfg, network):
+    from tsc.controllers.select import GapActuated
+    return GapActuated(network, loops=cfg.signals.actuated_loops)
 
 
 def _plan(cls):
@@ -47,10 +55,13 @@ BASELINES = {
     'greenwave_py': ('python', _plan(PlanController)),
     'plan_actuated': ('python', _plan(PlanActuated)),
     'select_assigned': ('python', None),       # built by evaluate (needs the assignment)
+    'actuated_py': ('python', lambda cfg, network: _gap_actuated(cfg, network)),
 }
 
 # Python baselines that run on the green-wave plan (signals.control = 'plan' timing)
 PLAN_BASELINES = ('greenwave_py', 'plan_actuated', 'select_assigned')
+# Python baselines that need a SignalHead ready every second, without the shield
+SECOND_BASELINES = PLAN_BASELINES + ('actuated_py',)
 
 
 def baseline(name, cfg=None, network=None):
@@ -68,4 +79,4 @@ def baseline(name, cfg=None, network=None):
 
 
 __all__ = ['BASELINES', 'Controller', 'DetectorMaxPressure', 'MaxPressure', 'PLAN_BASELINES',
-           'PlanActuated', 'PlanController', 'baseline']
+           'PlanActuated', 'PlanController', 'SECOND_BASELINES', 'baseline']

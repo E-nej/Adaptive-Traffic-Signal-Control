@@ -21,7 +21,7 @@ import os
 from tsc import config as config_mod
 from tsc import seeds as seeds_mod
 from tsc import plans as plans_mod
-from tsc.controllers import BASELINES, PLAN_BASELINES, baseline
+from tsc.controllers import BASELINES, PLAN_BASELINES, SECOND_BASELINES, baseline
 from tsc.controllers.webster import green_wave_programs, webster_programs
 from tsc.demand import generate_routes, is_directional, scenario_flip
 from tsc.experiments.common import (PLAN_CONTROLS, network_for, run_parallel, save_run_info,
@@ -131,7 +131,7 @@ def run_task(task):
             near = min(table, key=lambda x: abs(x - level))
             tls, controller = 'python', make_fixed(network, cfg, table[near])
             kwargs = sim_kwargs(config_mod.replace(cfg, signals={'control': 'select'}))
-        elif name in PLAN_BASELINES:
+        elif name in SECOND_BASELINES:
             plan_cfg = config_mod.replace(cfg, signals={'control': 'plan'})
             kwargs = sim_kwargs(plan_cfg)
             kwargs.update(max_green=None, max_red=None)   # the plan serves every stage

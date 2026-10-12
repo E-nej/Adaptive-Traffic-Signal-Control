@@ -54,14 +54,37 @@ class SignalConfig:
     control: str = 'stages'           # 'stages' (pick the next stage) | 'plan' (adjust a
                                       # coordinated plan: FOLLOW / HOLD / EARLY, step 2F)
                                       # | 'select' (pick the junction's controller, step 2G)
+                                      # | 'hierarchy' (a manager picks the experts, 2H)
     max_extension: int = 20           # s, plan control: longest green extension past the plan
     hold_guard: bool = False          # plan control: extend only if the next stage keeps its
                                       # minimum green; catch up without skipping stages
     select_interval: int = 90         # s, 'select' control: time between controller choices
-    experts: list[str] = field(       # 'select' control: controllers to choose from
+    experts: list[str] = field(       # 'select' / 'hierarchy': controllers to choose from
         default_factory=lambda: ['greenwave', 'coord_actuated', 'maxpressure'])
+    actuated_loops: str = 'stopline'  # 'actuated' expert / actuated_py: 'stopline' (2G) or
+                                      # 'upstream' (where SUMO's actuated control has them)
     max_green: int | None = None      # s, safety shield (None = off)
     max_red: int | None = None        # s, safety shield (None = off)
+
+
+@dataclass
+class HierarchyConfig:
+    """[signals] control = 'hierarchy' (controllers.hierarchy)."""
+    scope: str = 'network'            # one expert per 'network' | 'group' | 'junction'
+    group_range: float = 400.0        # m, scope 'group': signals this close form a group
+    interval: int = 300               # s between manager decisions
+    manager: str = 'learned'          # 'learned' (DQN) | 'fixed' (always fixed_expert)
+    fixed_expert: int = 0             # index into [signals] experts
+    worker: str = 'off'               # 'off': junctions run the chosen expert unmodified
+    reward: str = 'queue'             # manager reward (reward.KINDS), mean over the group
+    reward_scale: float = 1.0
+    gamma: float = 0.8
+    lr: float = 1e-3
+    tau: float = 0.01
+    batch_size: int = 32
+    buffer_size: int = 20000
+    updates: int = 20                 # gradient steps per manager decision
+    hidden: list[int] = field(default_factory=lambda: [64, 64])
 
 
 @dataclass
@@ -139,6 +162,7 @@ class Config:
     network: NetworkConfig = field(default_factory=NetworkConfig)
     demand: DemandConfig = field(default_factory=DemandConfig)
     signals: SignalConfig = field(default_factory=SignalConfig)
+    hierarchy: HierarchyConfig = field(default_factory=HierarchyConfig)
     observation: ObservationConfig = field(default_factory=ObservationConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)

@@ -124,9 +124,14 @@ def train_one(cfg, out_dir):
     eps_end_ep = max(1, int(tc.episodes * tc.eps_fraction))
     label = f'{cfg.name} s{seed}'
 
+    has_workers = bool(agents)
+    set_training = getattr(actions, 'set_training', None)
+
     for ep in range(tc.episodes):
         t0 = time.time()
         epsilon = max(tc.eps_min, 1.0 - (1.0 - tc.eps_min) * ep / eps_end_ep)
+        if set_training:
+            set_training(True, epsilon)
         level = float(rng.uniform(tc.level_min, tc.level_max))
         route_seed = seeds_mod.train(seed, ep)
         route = generate_routes(network, cfg.demand, os.path.join(work_dir, 'train.rou.xml'),
@@ -151,6 +156,9 @@ def train_one(cfg, out_dir):
 
         while not sim.done:
             for tl_id in sim.decision_points():
+                if not has_workers:
+                    sim.heads[tl_id].request(actions.stage(sim, tl_id, 0))
+                    continue
                 if actions.decides(sim, tl_id) or tl_id not in pending:
                     agent = agents[tl_id]
                     s = greedy.state(sim, tl_id)
@@ -179,14 +187,17 @@ def train_one(cfg, out_dir):
         row = {'episode': ep, 'level': round(level, 1), 'epsilon': round(epsilon, 3),
                'mean_reward': float(np.mean(rewards)) if rewards else 0.0,
                'mean_loss': float(np.mean(losses)) if losses else float('nan'), **m}
+        if hasattr(actions, 'episode_stats'):
+            row.update(actions.episode_stats())
 
         if (ep + 1) % tc.val_every == 0 or ep == tc.episodes - 1:
+            if set_training:
+                set_training(False, 0.0)
             val = validate(network, cfg, greedy, work_dir, library)
             row['val_delay'] = val
             if val < best_val:
                 best_val = val
-                for tl_id, agent in agents.items():
-                    agent.save(os.path.join(out_dir, f'best_{tl_id}.weights.h5'))
+                greedy.save(out_dir, 'best')
         row['seconds'] = round(time.time() - t0, 1)
 
         if log is None:
@@ -201,7 +212,6 @@ def train_one(cfg, out_dir):
               f"{'val %.1f ' % row['val_delay'] if 'val_delay' in row else ''}({row['seconds']}s)",
               flush=True)
 
-    for tl_id, agent in agents.items():
-        agent.save(os.path.join(out_dir, f'final_{tl_id}.weights.h5'))
+    greedy.save(out_dir, 'final')
     if log_file is not None:
         log_file.close()
