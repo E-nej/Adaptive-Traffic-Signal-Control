@@ -68,25 +68,32 @@ def _train_task(task):
     return out_dir
 
 
-def validate(network, cfg, controller, work_dir, library=None):
+def validate(network, cfg, controller, work_dir, library=None, routes=None):
     """Mean delay of the greedy policy on the validation scenarios.
 
     Plan control: every scenario runs once with its matching plan and once with the
     opposite direction's plan of the same level (a plan that does not fit the demand).
+    `routes` (a dict, filled on first use) keeps the generated route files, which are the
+    same at every validation of a run.
     """
     return float(np.mean(scenario_delays(network, cfg, controller, work_dir, library,
-                                         per_level=cfg.train.val_per_level)))
+                                         per_level=cfg.train.val_per_level, routes=routes)))
 
 
 def scenario_delays(network, cfg, controller, work_dir, library=None, per_level=1,
-                    seed_of=seeds_mod.validation):
+                    seed_of=seeds_mod.validation, routes=None):
     """Delay of every (scenario, plan variant) at the validation levels, `per_level`
-    scenarios per level with seeds `seed_of(i)` (validation: one per level)."""
+    scenarios per level with seeds `seed_of(i)` (validation: one per level).  `routes`
+    caches the route files by seed (see validate)."""
+    routes = {} if routes is None else routes
     delays = []
     jobs = [(lv, k) for k in range(per_level) for lv in cfg.train.val_levels]
     for i, (level, _) in enumerate(jobs):
         seed = seed_of(i)
-        route = generate_routes(network, cfg.demand, os.path.join(work_dir, 'val.rou.xml'), seed, level)
+        if seed not in routes:
+            routes[seed] = generate_routes(network, cfg.demand,
+                                           os.path.join(work_dir, f'val_{seed}.rou.xml'), seed, level)
+        route = routes[seed]
         variants = [None]
         if library is not None:
             flip = scenario_flip(cfg.demand, seed) if is_directional(cfg.demand) else None
@@ -108,7 +115,7 @@ def nearest_level(levels, level):
     return min(levels, key=lambda x: abs(x - level))
 
 
-def _default_expert(cfg, network, greedy, work_dir, library, out_dir, label):
+def _default_expert(cfg, network, greedy, work_dir, library, out_dir, label, val_routes=None):
     """Hierarchy with a default expert: validate every expert alone (workers agreeing),
     set the default ('auto': the best one) and save it alone as the first 'best'
     checkpoint, so the run deploys it unless the learned policy beats it on validation.
@@ -119,7 +126,7 @@ def _default_expert(cfg, network, greedy, work_dir, library, out_dir, label):
     vals = {}
     for e, name in enumerate(actions.names):
         actions.force(e)
-        vals[name] = validate(network, cfg, greedy, work_dir, library)
+        vals[name] = validate(network, cfg, greedy, work_dir, library, val_routes)
     name = cfg.hierarchy.default_expert
     if name == 'auto':
         name = min(vals, key=vals.get)
@@ -135,14 +142,14 @@ def _default_expert(cfg, network, greedy, work_dir, library, out_dir, label):
     return vals[name]
 
 
-def _worker_baseline(cfg, network, greedy, work_dir, library, out_dir, label):
+def _worker_baseline(cfg, network, greedy, work_dir, library, out_dir, label, val_routes=None):
     """Workers under a fixed expert (expert-specific workers): validate the expert alone
     (workers agreeing) and save it as the first 'best' checkpoint, so the run deploys the
     expert alone unless its workers beat it on validation.  Returns its validation delay."""
     actions = greedy.actions
     actions.set_training(False, 0.0)
     actions.force_agree = True
-    val = validate(network, cfg, greedy, work_dir, library)
+    val = validate(network, cfg, greedy, work_dir, library, val_routes)
     greedy.save(out_dir, 'best')
     actions.force_agree = False
     print(f'[{label}] {actions.names[cfg.hierarchy.fixed_expert]} alone (val delay): {val:.1f}',
@@ -358,11 +365,14 @@ def train_one(cfg, out_dir, on_episode_end=None):
     if cfg.signals.control == 'hierarchy' and cfg.hierarchy.worker == 'expert':
         raise ValueError('worker = "expert" uses workers trained in their own runs; only '
                          'manager = "table" builds a run with them')
+    val_routes = {}                 # validation route files, generated once per run
     fallback = _uses_fallback(cfg)
     if fallback == 'manager':
-        best_val = _default_expert(cfg, network, greedy, work_dir, library, out_dir, label)
+        best_val = _default_expert(cfg, network, greedy, work_dir, library, out_dir, label,
+                                   val_routes)
     elif fallback == 'workers':
-        best_val = _worker_baseline(cfg, network, greedy, work_dir, library, out_dir, label)
+        best_val = _worker_baseline(cfg, network, greedy, work_dir, library, out_dir, label,
+                                    val_routes)
 
     # The next episode's routes are generated in the background (a SUMO subprocess) while
     # this episode runs.  Its level is peeked from a copy of `rng`, so the draws from `rng`
@@ -457,7 +467,7 @@ def train_one(cfg, out_dir, on_episode_end=None):
         if (ep + 1) % tc.val_every == 0 or ep == tc.episodes - 1:
             if set_training:
                 set_training(False, 0.0)
-            val = validate(network, cfg, greedy, work_dir, library)
+            val = validate(network, cfg, greedy, work_dir, library, val_routes)
             row['val_delay'] = val
             if val < best_val:
                 improved = True
