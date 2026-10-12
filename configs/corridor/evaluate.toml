@@ -1,0 +1,22 @@
+# Corridor RL runs over the baseline demand sweep (same scenarios as baselines.toml).
+#   tsc evaluate configs/corridor/evaluate.toml
+#   tsc compare outputs/eval/corridor_baselines/results.csv outputs/eval/corridor/results.csv --ref greenwave
+name = "corridor"
+workers = 12
+
+[network]
+path = "networks/corridor/corridor.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.6
+tidal_share = 0.7
+tidal_random = true
+
+[evaluate]
+baselines = []
+runs = ["outputs/train/corridor_full/s*", "outputs/train/corridor_full_nocomm/s*",
+        "outputs/train/corridor_dir/s*", "outputs/train/corridor_dir_coop/s*",
+        "outputs/train/corridor_coop_nocomm/s*"]
+levels = [1000, 2000, 3000, 4000, 5000]
+n_seeds = 10

@@ -1,0 +1,15 @@
+# Step 1, paper's VA: Double DQN, soft target update, multi-objective reward, communication.
+#   tsc train configs/step1/full.toml --seeds 0-4
+name = "full"
+workers = 5
+
+[observation]
+mode = "grid"
+comm = true
+
+[reward]
+kind = "multi"
+
+[agent]
+double = true
+target_update = "soft"

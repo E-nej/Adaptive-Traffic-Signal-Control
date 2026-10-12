@@ -1,0 +1,18 @@
+# Step 2: VA with detector observations,
+# sensor noise / dropout and the max-green / max-red safety shield.
+#   tsc train configs/step2/full.toml --seeds 0-4
+name = "step2_full"
+workers = 5
+
+[signals]
+max_green = 60
+max_red = 90
+
+[observation]
+mode = "detector"
+comm = true
+noise = 0.05
+dropout = 0.02
+
+[reward]
+kind = "multi"

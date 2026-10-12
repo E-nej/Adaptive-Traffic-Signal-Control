@@ -1,0 +1,33 @@
+# Corridor RL with directional messages (2E.2): each neighbour sends what it knows about
+# the receiver (queue and releases toward it, whether it serves it, spillback from it).
+#   tsc train configs/corridor/dir.toml --seeds 0-4
+name = "corridor_dir"
+workers = 5
+
+[network]
+path = "networks/corridor/corridor.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.6
+tidal_share = 0.7
+tidal_random = true
+
+[signals]
+max_green = 60
+max_red = 90
+
+[observation]
+mode = "detector"
+comm = true
+message = "directional"
+noise = 0.05
+dropout = 0.02
+
+[reward]
+kind = "multi"
+
+[train]
+level_min = 1000.0
+level_max = 4500.0
+val_levels = [2000.0, 4000.0]

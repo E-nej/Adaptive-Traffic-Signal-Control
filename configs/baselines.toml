@@ -1,0 +1,9 @@
+# Step 1 baselines over the demand sweep (fixed, Webster, actuated, max-pressure).
+#   tsc evaluate configs/baselines.toml
+name = "baselines"
+workers = 6
+
+[evaluate]
+baselines = ["fixed", "webster", "actuated", "maxpressure"]
+levels = [600, 1200, 1800, 2400, 3000, 3600]
+n_seeds = 10

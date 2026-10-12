@@ -1,0 +1,85 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<edges>
+  <edge id="W_S0" from="W" to="S0" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="W_S0" idAfter="W_S0_bay" />
+  </edge>
+  <edge id="S0_W" from="S0" to="W" priority="3" numLanes="2" speed="13.89" type="primary" />
+  <edge id="S0_S1" from="S0" to="S1" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="S0_S1" idAfter="S0_S1_bay" />
+  </edge>
+  <edge id="S1_S0" from="S1" to="S0" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="S1_S0" idAfter="S1_S0_bay" />
+  </edge>
+  <edge id="S1_R0" from="S1" to="R0" priority="3" numLanes="2" speed="13.89" type="primary" />
+  <edge id="R0_S1" from="R0" to="S1" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="R0_S1" idAfter="R0_S1_bay" />
+  </edge>
+  <edge id="R0_S2" from="R0" to="S2" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="R0_S2" idAfter="R0_S2_bay" />
+  </edge>
+  <edge id="S2_R0" from="S2" to="R0" priority="3" numLanes="2" speed="13.89" type="primary" />
+  <edge id="S2_R1" from="S2" to="R1" priority="3" numLanes="2" speed="13.89" type="primary" />
+  <edge id="R1_S2" from="R1" to="S2" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="R1_S2" idAfter="R1_S2_bay" />
+  </edge>
+  <edge id="R1_S3" from="R1" to="S3" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="R1_S3" idAfter="R1_S3_bay" />
+  </edge>
+  <edge id="S3_R1" from="S3" to="R1" priority="3" numLanes="2" speed="13.89" type="primary" />
+  <edge id="S3_S4" from="S3" to="S4" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="S3_S4" idAfter="S3_S4_bay" />
+  </edge>
+  <edge id="S4_S3" from="S4" to="S3" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="S4_S3" idAfter="S4_S3_bay" />
+  </edge>
+  <edge id="S4_R2" from="S4" to="R2" priority="3" numLanes="2" speed="13.89" type="primary" />
+  <edge id="R2_S4" from="R2" to="S4" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="R2_S4" idAfter="R2_S4_bay" />
+  </edge>
+  <edge id="R2_S5" from="R2" to="S5" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="R2_S5" idAfter="R2_S5_bay" />
+  </edge>
+  <edge id="S5_R2" from="S5" to="R2" priority="3" numLanes="2" speed="13.89" type="primary" />
+  <edge id="S5_S6" from="S5" to="S6" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="S5_S6" idAfter="S5_S6_bay" />
+  </edge>
+  <edge id="S6_S5" from="S6" to="S5" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="S6_S5" idAfter="S6_S5_bay" />
+  </edge>
+  <edge id="S6_E" from="S6" to="E" priority="3" numLanes="2" speed="13.89" type="primary" />
+  <edge id="E_S6" from="E" to="S6" priority="3" numLanes="2" speed="13.89" type="primary">
+    <split pos="-75" lanes="0 1 2" idBefore="E_S6" idAfter="E_S6_bay" />
+  </edge>
+  <edge id="S0n_S0" from="S0n" to="S0" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S0_S0n" from="S0" to="S0n" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S0s_S0" from="S0s" to="S0" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S0_S0s" from="S0" to="S0s" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S1n_S1" from="S1n" to="S1" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S1_S1n" from="S1" to="S1n" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S1s_S1" from="S1s" to="S1" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S1_S1s" from="S1" to="S1s" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S2n_S2" from="S2n" to="S2" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S2_S2n" from="S2" to="S2n" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S3n_S3" from="S3n" to="S3" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S3_S3n" from="S3" to="S3n" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S3s_S3" from="S3s" to="S3" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S3_S3s" from="S3" to="S3s" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S4s_S4" from="S4s" to="S4" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S4_S4s" from="S4" to="S4s" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S5n_S5" from="S5n" to="S5" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S5_S5n" from="S5" to="S5n" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S5s_S5" from="S5s" to="S5" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S5_S5s" from="S5" to="S5s" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S6n_S6" from="S6n" to="S6" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S6_S6n" from="S6" to="S6n" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S6s_S6" from="S6s" to="S6" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="S6_S6s" from="S6" to="S6s" priority="2" numLanes="1" speed="11.11" type="secondary" />
+  <edge id="R0n_R0" from="R0n" to="R0" priority="1" numLanes="1" speed="8.33" type="residential" />
+  <edge id="R0_R0n" from="R0" to="R0n" priority="1" numLanes="1" speed="8.33" type="residential" />
+  <edge id="R1n_R1" from="R1n" to="R1" priority="1" numLanes="1" speed="8.33" type="residential" />
+  <edge id="R1_R1n" from="R1" to="R1n" priority="1" numLanes="1" speed="8.33" type="residential" />
+  <edge id="R1s_R1" from="R1s" to="R1" priority="1" numLanes="1" speed="8.33" type="residential" />
+  <edge id="R1_R1s" from="R1" to="R1s" priority="1" numLanes="1" speed="8.33" type="residential" />
+  <edge id="R2s_R2" from="R2s" to="R2" priority="1" numLanes="1" speed="8.33" type="residential" />
+  <edge id="R2_R2s" from="R2" to="R2s" priority="1" numLanes="1" speed="8.33" type="residential" />
+</edges>

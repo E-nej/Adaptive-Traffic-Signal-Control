@@ -1,0 +1,15 @@
+# Step 1, paper's EA: DQN, hard target update, waiting-time reward, no communication.
+#   tsc train configs/step1/base.toml --seeds 0-4
+name = "base"
+workers = 5
+
+[observation]
+mode = "grid"
+comm = false
+
+[reward]
+kind = "wait"
+
+[agent]
+double = false
+target_update = "hard"

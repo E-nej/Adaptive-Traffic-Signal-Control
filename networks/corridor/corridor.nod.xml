@@ -1,0 +1,31 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<nodes>
+  <node id="W" x="-300.00" y="0.00" type="dead_end" />
+  <node id="E" x="2020.00" y="0.00" type="dead_end" />
+  <node id="S0" x="0.00" y="0.00" type="traffic_light" />
+  <node id="S0n" x="0.00" y="300.00" type="dead_end" />
+  <node id="S0s" x="0.00" y="-300.00" type="dead_end" />
+  <node id="S1" x="280.00" y="0.00" type="traffic_light" />
+  <node id="S1n" x="280.00" y="300.00" type="dead_end" />
+  <node id="S1s" x="280.00" y="-300.00" type="dead_end" />
+  <node id="S2" x="520.00" y="0.00" type="traffic_light" />
+  <node id="S2n" x="520.00" y="300.00" type="dead_end" />
+  <node id="S3" x="900.00" y="0.00" type="traffic_light" />
+  <node id="S3n" x="900.00" y="300.00" type="dead_end" />
+  <node id="S3s" x="900.00" y="-300.00" type="dead_end" />
+  <node id="S4" x="1150.00" y="0.00" type="traffic_light" />
+  <node id="S4s" x="1150.00" y="-300.00" type="dead_end" />
+  <node id="S5" x="1500.00" y="0.00" type="traffic_light" />
+  <node id="S5n" x="1500.00" y="300.00" type="dead_end" />
+  <node id="S5s" x="1500.00" y="-300.00" type="dead_end" />
+  <node id="S6" x="1720.00" y="0.00" type="traffic_light" />
+  <node id="S6n" x="1720.00" y="300.00" type="dead_end" />
+  <node id="S6s" x="1720.00" y="-300.00" type="dead_end" />
+  <node id="R0" x="400.00" y="0.00" type="priority" />
+  <node id="R0n" x="400.00" y="150.00" type="dead_end" />
+  <node id="R1" x="720.00" y="0.00" type="priority" />
+  <node id="R1n" x="720.00" y="150.00" type="dead_end" />
+  <node id="R1s" x="720.00" y="-150.00" type="dead_end" />
+  <node id="R2" x="1320.00" y="0.00" type="priority" />
+  <node id="R2s" x="1320.00" y="-150.00" type="dead_end" />
+</nodes>
