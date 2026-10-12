@@ -58,7 +58,8 @@ def make_actions(network, observer, cfg):
     """Action space of a Config (signals.control)."""
     s = cfg.signals
     if s.control == 'plan':
-        return PlanActions(network, interval=s.decision_interval, max_extension=s.max_extension)
+        return PlanActions(network, interval=s.decision_interval, max_extension=s.max_extension,
+                           guard=s.hold_guard)
     if s.control == 'select':
         o = cfg.observation
         return SelectorActions(network, select_interval=s.select_interval,
