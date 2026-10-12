@@ -90,7 +90,7 @@ class SelectorActions:
 
     def __init__(self, network, select_interval=90, interval=5, max_extension=20,
                  noise=0.0, dropout=0.0, e2_length=50.0, comm=True, seed=0,
-                 experts=DEFAULT_EXPERTS, actuated_loops='stopline'):
+                 experts=DEFAULT_EXPERTS, actuated_loops='stopline', hold_guard=False):
         unknown = set(experts) - set(EXPERTS)
         if unknown:
             raise ValueError(f'Unknown experts {sorted(unknown)}; choose from {EXPERTS}')
@@ -100,8 +100,10 @@ class SelectorActions:
         self.comm = comm
         self.names = list(experts)
         make = {
-            'greenwave': lambda: PlanController(network, interval, max_extension),
-            'coord_actuated': lambda: PlanActuated(network, interval, max_extension),
+            'greenwave': lambda: PlanController(network, interval, max_extension,
+                                                guard=hold_guard),
+            'coord_actuated': lambda: PlanActuated(network, interval, max_extension,
+                                                   guard=hold_guard),
             'maxpressure': lambda: DetectorMaxPressure(noise=noise, dropout=dropout,
                                                        e2_length=e2_length, seed=seed),
             'actuated': lambda: GapActuated(network, loops=actuated_loops),
@@ -144,11 +146,20 @@ class SelectorActions:
         return np.ones(self.n_actions, dtype=bool)
 
     def stage(self, sim, tl_id, action):
+        self.activate(sim, tl_id, action)
+        return self.propose(sim, tl_id)
+
+    def activate(self, sim, tl_id, action):
+        """Hand the junction to expert `action` (a plan expert rejoins its plan)."""
         if action != self.active[tl_id]:
             if action in self.plan_experts:
                 self.experts[action].actions.rejoin(sim, tl_id)
             self.active[tl_id] = action
             self.mp_stage.pop(tl_id, None)
+
+    def propose(self, sim, tl_id):
+        """Stage the active expert asks for now (call once per second and junction)."""
+        action = self.active[tl_id]
         if action not in self.periodic:
             return self.experts[action].act(sim, tl_id)
         # max-pressure re-decides every `interval` s of green, as its baseline does

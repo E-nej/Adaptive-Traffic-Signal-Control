@@ -56,7 +56,8 @@ class SignalConfig:
                                       # | 'select' (pick the junction's controller, step 2G)
                                       # | 'hierarchy' (a manager picks the experts, 2H)
     max_extension: int = 20           # s, plan control: longest green extension past the plan
-    hold_guard: bool = False          # plan control: extend only if the next stage keeps its
+    hold_guard: bool = False          # plan control (and plan experts under 'hierarchy'):
+                                      # extend only if the next stage keeps its
                                       # minimum green; catch up without skipping stages
     select_interval: int = 90         # s, 'select' control: time between controller choices
     experts: list[str] = field(       # 'select' / 'hierarchy': controllers to choose from
@@ -75,7 +76,8 @@ class HierarchyConfig:
     interval: int = 300               # s between manager decisions
     manager: str = 'learned'          # 'learned' (DQN) | 'fixed' (always fixed_expert)
     fixed_expert: int = 0             # index into [signals] experts
-    worker: str = 'off'               # 'off': junctions run the chosen expert unmodified
+    worker: str = 'off'               # 'off': junctions run the chosen expert unmodified;
+                                      # 'residual': per-junction RL fine-tunes it
     reward: str = 'queue'             # manager reward (reward.KINDS), mean over the group
     reward_scale: float = 1.0
     gamma: float = 0.8

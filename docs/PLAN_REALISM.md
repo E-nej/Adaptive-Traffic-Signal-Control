@@ -345,8 +345,12 @@ win Maribor), with RL adding gains on top. Two levels (`[signals] control = "hie
   (detector aggregates of the group and of the whole network, the group's expert, its share
   of the signals), so a manager can be moved between networks. Reward: −mean queue per lane
   in the group. `manager = "fixed"` runs one expert through the same machinery (baseline).
-- **Workers** (bottom): `worker = "off"` runs the chosen expert unmodified. Next: residual RL
-  per junction that fine-tunes the active expert (expert id as input).
+- **Workers** (bottom): `worker = "off"` runs the chosen expert unmodified; `"residual"`: a
+  shared DQN per junction picks AGREE / HOLD / SWITCH every 5 s of green (on a plan expert
+  the plan's HOLD / EARLY, with the hold guard); between decisions an agreeing worker leaves
+  the expert in control second by second. Input: detectors + directional messages + active
+  expert, whether it wants to switch, extension used, plan features. Both levels learn in
+  the same run. A worker that always agrees reproduces each expert exactly (tested).
 
 - [x] 2H.0 The selector's `actuated` expert was a weaker copy of SUMO's actuated control
       (stop-line loops: a vehicle standing on the loop holds the green), so every 2G result
@@ -365,9 +369,11 @@ win Maribor), with RL adding gains on top. Two levels (`[signals] control = "hie
       would be handing a junction to SUMO's own actuated program while that expert is active.
 - [x] 2H.1 Manager with `worker = "off"`: `configs/hierarchy/{maribor_network,maribor_group,
       corridor_network}.toml`, tests in `tests/test_hierarchy.py`.
-- [ ] 2H.2 Train and evaluate 2H.1 (3 seeds × 150 episodes) against the best classic
-      controller per network and the uniform experts (`manager = "fixed"`).
-- [ ] 2H.3 Residual workers on the active expert (1–2 s decisions, shared network).
+- [x] 2H.2 Residual workers (`worker = "residual"`).
+- [ ] 2H.3 Train manager + workers together, 3 seeds × 150 episodes:
+      `configs/hierarchy/{maribor_network,maribor_group,corridor_network}.toml` (left out:
+      per-junction scope, which is 2G, and the variants without workers). Evaluate against the
+      best classic controller per network and the uniform experts (`manager = "fixed"`).
 - [ ] 2H.4 Imitation warm start; leave-one-network-out test (train on two networks, test on
       the third).
 
@@ -448,4 +454,4 @@ uv run tsc diagnose messages configs/step2/evaluate.toml         # do agents use
   (now recomputed), detectors on sub-metre OSM lanes (now multi-lane), a 120 s max-red shield
   overriding 122 s plan cycles (selector uses 150 s).
 - 2026-10-12: 2H started (branch `2h-hierarchy`): the actuated expert fixed (2H.0), manager
-  implemented (2H.1).
+  implemented (2H.1), residual workers (2H.2); training of 2H.3 started.
