@@ -240,8 +240,21 @@ stages behind rejoins the plan.
       regimes), `plan_dir` −2 to −5 %. The "tuned" learning setup (lr 5e-4, τ 0.01, reward ×0.1,
       faster ε decay) is worse everywhere; the free-stage RL with shared network + tuned setup is
       still ×2.5 the green wave at 4000.
-- [ ] 2F.5 Clean communication test: `plan_dir_shared_long` vs `plan_nocomm_shared_long` (only
-      the messages differ), 5 seeds × 300 episodes.
+- [x] 2F.5 Clean communication test: `plan_dir_shared_long` vs `plan_nocomm_shared_long` (only
+      the messages differ), 5 seeds × 300 episodes, paired over 10 scenarios × 5 seeds:
+
+      | messages vs none, delay      | 1000    | 2000    | 3000    | 4000    | 5000   |
+      |------------------------------|---------|---------|---------|---------|--------|
+      | opposite plans, best weights | +4.9 %* | −1.9 %  | −2.1 %  | +0.4 %  | −1.4 % |
+      | opposite plans, final weights| +25.3 %*| −5.4 %* | −6.8 %* | −3.7 %* | −3.0 % |
+      | tuned plans, best weights    | +6.5 %* | −0.6 %  | −0.2 %  | −0.7 %  | −0.5 % |
+      | tuned plans, final weights   | +19.7 %*| −5.3 %* | −6.5 %* | −4.9 %* | −5.1 %*|
+
+      **Directional messages help by 4–7 % at 2000–5000 veh/h with the final weights (both
+      regimes, significant), but not at 1000 veh/h**; picking the best validation checkpoint
+      hides the difference (it partly selects the luckiest validation). 300 episodes are no
+      better than 150 (`plan_dir_shared`). At 1000 veh/h the best checkpoints reach 39–45 s vs
+      52–66 s for the plan; the final weights are less stable there.
 
 ## Step 2G — Choosing the controller per junction
 Each road may have a different best controller, so each junction picks one of several experts
