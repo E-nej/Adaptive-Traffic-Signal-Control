@@ -154,6 +154,7 @@ def run_task(task):
         elif cfg.signals.max_green is None and cfg.signals.max_red is None:
             # no shield set for the evaluation: use the one the run was trained with
             kwargs.update(max_green=run_cfg.signals.max_green, max_red=run_cfg.signals.max_red)
+        kwargs['approach_length'] = run_cfg.observation.approach_length   # its detectors
         seed = run_cfg.train.seeds[0]
         tag = f'_{ec.which}' if ec.which != 'best' else ''
         meta = {'controller': f'{run_cfg.name}{tag}_s{seed}', 'config': run_cfg.name + tag,
