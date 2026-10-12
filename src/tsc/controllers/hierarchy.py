@@ -18,18 +18,22 @@ over the interval.
 
 Bottom level: the junctions of a group run the chosen expert (SelectorActions, so a
 change of expert is safe: SignalHead intergreens, a plan expert rejoins the plan).
-worker = 'off' runs the experts unmodified; per-junction RL that fine-tunes the active
-expert comes on top of this.
+worker = 'off' runs the experts unmodified; worker = 'residual' adds a per-junction agent
+that fine-tunes the active expert (HierarchyActions).  Both levels train in the same run.
 """
 
 import numpy as np
 
+from tsc.controllers.plan import EARLY, FOLLOW, HOLD, PlanActions
 from tsc.controllers.select import SelectorActions
 from tsc.detectors import e1_id, e2_capacity, e2_id
 
 SCOPES = ('network', 'group', 'junction')
 GROUP_FEATS = 5            # jam ratio, occupancy, speed ratio, flow, jam now
 SAT_FLOW = 0.5             # veh/s per lane (1800 veh/h): flow normalisation
+WORKERS = ('off', 'residual')
+AGREE, HOLD_W, SWITCH = 0, 1, 2        # worker actions
+N_WORKER_ACTIONS = 3
 
 
 def make_groups(network, scope, group_range):
@@ -184,26 +188,40 @@ class Manager:
 class HierarchyActions:
     """Action space of the bottom level under a manager ([signals] control = 'hierarchy').
 
-    With worker = 'off' the junctions have no RL agent of their own: every junction runs the
-    expert the manager chose for its group (has_workers = False).
+    worker = 'off'      : no junction agents (has_workers = False); every junction runs the
+                          expert the manager chose for its group.
+    worker = 'residual' : one agent per junction (or shared) fine-tunes the active expert.
+                          Every `decision_interval` s of green after min green it picks
+                              AGREE  : do what the expert does (the expert keeps control
+                                       second by second until the next decision)
+                              HOLD   : keep the green although the expert wants to switch
+                                       (at most max_extension s past the expert per green)
+                              SWITCH : end the green now although the expert holds it
+                          On a plan expert HOLD / SWITCH are the plan's HOLD / EARLY, so the
+                          plan's timing stays the reference.  Input: the junction's
+                          observation + the active expert, whether it wants to switch, the
+                          extension used and the plan features (zeros without a plan).
     """
 
     needs_plan = True
-    n_actions = 1
-    extra_dim = 0
 
     def __init__(self, network, cfg, seed=0):
         h, s, o = cfg.hierarchy, cfg.signals, cfg.observation
-        if h.worker != 'off':
-            raise ValueError(f'Unknown worker mode {h.worker!r}')
+        if h.worker not in WORKERS:
+            raise ValueError(f'Unknown worker mode {h.worker!r}; choose from {WORKERS}')
         self.network = network
-        self.has_workers = False
+        self.has_workers = h.worker == 'residual'
+        self.interval = s.decision_interval
+        self.max_extension = s.max_extension
         self.selector = SelectorActions(network, interval=s.decision_interval,
                                         max_extension=s.max_extension, noise=o.noise,
                                         dropout=o.dropout, e2_length=o.e2_length, comm=False,
                                         seed=seed, experts=s.experts,
-                                        actuated_loops=s.actuated_loops)
+                                        actuated_loops=s.actuated_loops,
+                                        hold_guard=s.hold_guard)
         self.names = self.selector.names
+        self.n_actions = N_WORKER_ACTIONS if self.has_workers else 1
+        self.extra_dim = len(self.names) + 2 + PlanActions.extra_dim if self.has_workers else 0
         groups = make_groups(network, h.scope, h.group_range)
         agent = None
         if h.manager == 'learned':
@@ -230,7 +248,12 @@ class HierarchyActions:
         return {'manager': self.manager.agent} if self.manager.agent is not None else {}
 
     def episode_stats(self):
-        return {f'mgr_{n}': round(float(x), 3) for n, x in zip(self.names, self.manager.shares())}
+        stats = {f'mgr_{n}': round(float(x), 3) for n, x in zip(self.names, self.manager.shares())}
+        if self.has_workers:
+            total = max(1, self.overrides.sum() + self.agrees)
+            stats['wrk_hold'] = round(float(self.overrides[0] / total), 3)
+            stats['wrk_switch'] = round(float(self.overrides[1] / total), 3)
+        return stats
 
     # Controller-like interface ----------------------------------------
 
@@ -243,23 +266,115 @@ class HierarchyActions:
     def reset(self, sim):
         self.selector.reset(sim)
         self.manager.reset(sim)
+        self.last = {t: AGREE for t in self.network.tl_ids}     # worker action of this green
+        self.held = {t: 0 for t in self.network.tl_ids}         # s held past the expert
+        self.green = {t: None for t in self.network.tl_ids}     # (stage, start) of the green
+        self.cache = {}                                         # tl -> (t, proposal)
+        self.overrides = np.zeros(2)
+        self.agrees = 0
 
     def tick(self, sim):
         self.selector.tick(sim)
         self.manager.tick(sim)
 
+    def expert(self, tl_id):
+        return self.manager.choice[self.group_of[tl_id]]
+
     def decides(self, sim, tl_id):
-        return False
+        if not self.has_workers:
+            return False
+        head = sim.heads[tl_id]
+        return (head.timer - head.min_green) % self.interval == 0
+
+    def _new_green(self, sim, tl_id):
+        """Reset the worker's per-green state when a new green has started."""
+        head = sim.heads[tl_id]
+        key = (head.stage, sim.t - head.timer)
+        if self.green[tl_id] != key:
+            self.green[tl_id] = key
+            self.last[tl_id] = AGREE
+            self.held[tl_id] = 0
+
+    def _proposal(self, sim, tl_id):
+        """What the active expert does now: a stage (other experts) or a plan action
+        (plan experts), computed once per second."""
+        hit = self.cache.get(tl_id)
+        if hit is not None and hit[0] == sim.t:
+            return hit[1]
+        e = self.expert(tl_id)
+        self.selector.activate(sim, tl_id, e)
+        if e in self.selector.plan_experts:
+            out = self.selector.experts[e].policy(sim, tl_id)
+        else:
+            out = self.selector.propose(sim, tl_id)
+        self.cache[tl_id] = (sim.t, out)
+        return out
+
+    def _wants_switch(self, sim, tl_id):
+        e, p = self.expert(tl_id), self._proposal(sim, tl_id)
+        if e in self.selector.plan_experts:
+            acts = self.selector.experts[e].actions
+            return p == EARLY or (p == FOLLOW and acts.count[tl_id] < acts.plans[tl_id].counter(sim.t))
+        return p != sim.heads[tl_id].stage
 
     def mask(self, sim, tl_id):
-        return np.ones(1, dtype=bool)
+        if not self.has_workers:
+            return np.ones(1, dtype=bool)
+        self._new_green(sim, tl_id)
+        e, p = self.expert(tl_id), self._proposal(sim, tl_id)
+        mask = np.zeros(N_WORKER_ACTIONS, dtype=bool)
+        mask[AGREE] = True
+        if e in self.selector.plan_experts:
+            plan_mask = self.selector.experts[e].actions.mask(sim, tl_id)
+            mask[HOLD_W] = plan_mask[HOLD] and p != HOLD
+            mask[SWITCH] = plan_mask[EARLY] and p != EARLY
+        else:
+            wants = self._wants_switch(sim, tl_id)
+            mask[HOLD_W] = wants and self.held[tl_id] < self.max_extension
+            mask[SWITCH] = not wants and len(self.network.greens[tl_id]) > 1
+        return mask
 
-    def stage(self, sim, tl_id, action=0):
-        expert = self.manager.choice[self.group_of[tl_id]]
-        return self.selector.stage(sim, tl_id, expert)
+    def stage(self, sim, tl_id, action=AGREE):
+        if not self.has_workers:
+            return self.selector.stage(sim, tl_id, self.expert(tl_id))
+        self._new_green(sim, tl_id)
+        e, p = self.expert(tl_id), self._proposal(sim, tl_id)
+        head = sim.heads[tl_id]
+        deciding = self.decides(sim, tl_id)
+        if deciding:
+            action = action if self.mask(sim, tl_id)[action] else AGREE
+            self.last[tl_id] = action
+            if action == AGREE:
+                self.agrees += 1
+            else:
+                self.overrides[action - 1] += 1
+        action = self.last[tl_id]
+        if e in self.selector.plan_experts:
+            acts = self.selector.experts[e].actions
+            if deciding:
+                choice = {AGREE: p, HOLD_W: HOLD, SWITCH: EARLY}[action]
+                acts.last[tl_id] = choice if acts.mask(sim, tl_id)[choice] else FOLLOW
+            return acts.stage(sim, tl_id, acts.last[tl_id])
+        if action == HOLD_W and p != head.stage and self.held[tl_id] < self.max_extension:
+            self.held[tl_id] += 1
+            return head.stage
+        if action == SWITCH and deciding and p == head.stage:
+            return (head.stage + 1) % len(self.network.greens[tl_id])
+        return p
 
     def features(self, sim, tl_id):
-        return np.zeros(0, dtype=np.float32)
+        if not self.has_workers:
+            return np.zeros(0, dtype=np.float32)
+        self._new_green(sim, tl_id)
+        e = self.expert(tl_id)
+        own = np.zeros(len(self.names), dtype=np.float32)
+        own[e] = 1.0
+        plan = np.zeros(PlanActions.extra_dim, dtype=np.float32)
+        if e in self.selector.plan_experts:
+            plan = self.selector.experts[e].actions.features(sim, tl_id)
+        wants = float(self._wants_switch(sim, tl_id))
+        held = self.held[tl_id] / max(1, self.max_extension)
+        return np.concatenate([own, [wants, held], plan]).astype(np.float32)
 
 
 __all__ = ['HierarchyActions', 'Manager', 'SCOPES', 'make_groups']

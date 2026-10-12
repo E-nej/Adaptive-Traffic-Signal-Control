@@ -1,5 +1,6 @@
-# Step 2H on Maribor: a manager picks one expert per group of signals within 400 m every 5 min;
-# junctions run it unmodified (worker 'off').
+# Step 2H: Maribor, one expert per group of signals within 400 m (10 groups)
+# Both levels learn in the same run: the manager picks the experts every 5 min, residual
+# workers fine-tune the active expert at every junction.
 #   tsc train configs/hierarchy/maribor_group.toml --seeds 0-2
 name = "hier_maribor_group"
 workers = 3
@@ -17,21 +18,32 @@ min_distance = 300.0
 
 [signals]
 control = "hierarchy"
-decision_interval = 5
+decision_interval = 5    # workers decide every 5 s of green; the expert acts every second
 max_extension = 20
+hold_guard = true
 max_red = 150
 experts = ["greenwave", "coord_actuated", "maxpressure", "actuated"]
-actuated_loops = "sumo"   # the actuated expert as close to SUMO's as we got (2H)
+actuated_loops = "sumo"
 
 [hierarchy]
 scope = "group"
 group_range = 400.0
 interval = 300
+worker = "residual"
 
 [observation]
 mode = "detector"
+comm = true
+message = "directional"
 noise = 0.05
 dropout = 0.02
+
+[reward]                 # workers: as the best plan-RL run (3.6, guard + coop)
+kind = "multi"
+neighbour_weight = 0.5
+
+[agent]                  # workers: one shared network
+shared = true
 
 [train]
 level_min = 2000.0

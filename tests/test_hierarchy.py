@@ -106,3 +106,97 @@ def test_fixed_manager_is_the_expert(corridor, work_root):
                                 decision_interval=1)
     assert out['hier']['delay'] == pytest.approx(out['alone']['delay'])
     assert hier.actions.manager.shares()[1] == 1.0
+
+
+class Forced:
+    """Drives HierarchyActions with one fixed worker action (no learning)."""
+
+    needs_plan = True
+
+    def __init__(self, actions, action):
+        self.actions, self.action = actions, action
+
+    def set_plans(self, plans):
+        self.actions.set_plans(plans)
+
+    def reset(self, sim):
+        self.actions.reset(sim)
+
+    def tick(self, sim):
+        self.actions.tick(sim)
+
+    def act(self, sim, tl_id):
+        return self.actions.stage(sim, tl_id, self.action)
+
+
+@pytest.fixture(scope='module')
+def corridor_plans(corridor, work_root):
+    from tsc.controllers.webster import green_wave_programs
+    from tsc.demand import generate_routes
+    from tsc.plans import load_plans
+    demand = DemandConfig(generator='od', profile='flat', duration=300, tidal_share=0.7,
+                          tidal_random=False)
+    route = generate_routes(corridor, demand, os.path.join(work_root, 'res.rou.xml'), 5, 3000)
+    plan = green_wave_programs(corridor, [route], os.path.join(work_root, 'res_gw.add.xml'))
+    return route, load_plans(plan, corridor)
+
+
+@pytest.mark.sumo
+@pytest.mark.parametrize('expert', [0, 1, 2, 3])
+def test_agreeing_worker_is_the_expert(corridor, corridor_plans, work_root, expert):
+    """A worker that always agrees changes nothing: same result as the expert alone."""
+    from tsc.controllers.hierarchy import AGREE, HierarchyActions
+    from tsc.simulation import run_episode
+    route, plans = corridor_plans
+    out = {}
+    for worker in ('off', 'residual'):
+        cfg = hierarchy_cfg(manager='fixed', fixed_expert=expert, worker=worker)
+        cfg.signals.experts = ['greenwave', 'coord_actuated', 'maxpressure', 'actuated']
+        cfg.observation.noise = 0.0
+        ctrl = Forced(HierarchyActions(corridor, cfg), AGREE)
+        ctrl.set_plans(plans)
+        out[worker] = run_episode(corridor, ctrl, route, 300,
+                                  os.path.join(work_root, 'smoke', f'agree_{expert}_{worker}'),
+                                  seed=1, decision_interval=1)
+    assert out['residual']['delay'] == pytest.approx(out['off']['delay'])
+
+
+@pytest.mark.sumo
+@pytest.mark.parametrize('action', [1, 2])
+def test_overriding_worker_changes_the_timing(corridor, corridor_plans, work_root, action):
+    from tsc.controllers.hierarchy import AGREE, HierarchyActions
+    from tsc.simulation import run_episode
+    route, plans = corridor_plans
+    out = {}
+    for a in (AGREE, action):
+        cfg = hierarchy_cfg(manager='fixed', fixed_expert=1, worker='residual')
+        actions = HierarchyActions(corridor, cfg)
+        out[a] = run_episode(corridor, Forced(actions, a), route, 300,
+                             os.path.join(work_root, 'smoke', f'override_{action}_{a}'),
+                             seed=1, decision_interval=1)
+        stats = actions.episode_stats()
+    assert out[action]['delay'] != pytest.approx(out[AGREE]['delay'])
+    assert stats['wrk_hold' if action == 1 else 'wrk_switch'] > 0
+
+
+@pytest.mark.sumo
+def test_both_levels_learn(corridor, work_root):
+    """One training episode with a learning manager and residual workers."""
+    from tsc import config as config_mod
+    from tsc.experiments.train import train_one
+    cfg = hierarchy_cfg(interval=60, hidden=[8], updates=2, batch_size=4, worker='residual')
+    cfg = config_mod.replace(cfg, name='hier_smoke', output_dir=os.path.join(work_root, 'out'),
+                             network={'path': CORRIDOR},
+                             demand={'generator': 'od', 'duration': 300, 'tidal_share': 0.7},
+                             agent={'hidden': [16], 'shared': True, 'learn_start': 50,
+                                    'batch_size': 16},
+                             train={'seeds': [0], 'episodes': 1, 'val_every': 1,
+                                    'val_levels': [2500.0], 'level_min': 2500.0,
+                                    'level_max': 2500.0})
+    out = os.path.join(work_root, 'out', 'hier_smoke')
+    train_one(cfg, out)
+    files = os.listdir(out)
+    assert 'final_manager.weights.h5' in files and 'best_S0.weights.h5' in files
+    with open(os.path.join(out, 'train_log.csv')) as f:
+        header = f.readline()
+    assert 'mgr_actuated' in header and 'wrk_hold' in header

@@ -142,8 +142,8 @@ class PlanController(Controller):
 
     needs_plan = True
 
-    def __init__(self, network, interval=5, max_extension=20):
-        self.actions = PlanActions(network, interval, max_extension)
+    def __init__(self, network, interval=5, max_extension=20, guard=False):
+        self.actions = PlanActions(network, interval, max_extension, guard=guard)
 
     def set_plans(self, plans):
         self.actions.set_plans(plans)
@@ -167,8 +167,8 @@ class PlanActuated(PlanController):
     keep arriving on the served lanes (gap < `gap` s at the stop-line loops) and end it
     early when the served lanes' detectors are empty and another stage has a queue."""
 
-    def __init__(self, network, interval=5, max_extension=20, gap=3):
-        super().__init__(network, interval, max_extension)
+    def __init__(self, network, interval=5, max_extension=20, gap=3, guard=False):
+        super().__init__(network, interval, max_extension, guard=guard)
         self.network = network
         self.gap = gap
 

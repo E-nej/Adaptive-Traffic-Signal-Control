@@ -1,4 +1,6 @@
-# Step 2H on the corridor: a manager picks one expert for all 7 signals every 5 min.
+# Step 2H: corridor, one expert for all 7 signals
+# Both levels learn in the same run: the manager picks the experts every 5 min, residual
+# workers fine-tune the active expert at every junction.
 #   tsc train configs/hierarchy/corridor_network.toml --seeds 0-2
 name = "hier_corridor_network"
 workers = 3
@@ -14,20 +16,31 @@ tidal_random = true
 
 [signals]
 control = "hierarchy"
-decision_interval = 5
+decision_interval = 5    # workers decide every 5 s of green; the expert acts every second
 max_extension = 20
+hold_guard = true
 max_red = 150
 experts = ["greenwave", "coord_actuated", "maxpressure", "actuated"]
-actuated_loops = "sumo"   # the actuated expert as close to SUMO's as we got (2H)
+actuated_loops = "sumo"
 
 [hierarchy]
 scope = "network"
 interval = 300
+worker = "residual"
 
 [observation]
 mode = "detector"
+comm = true
+message = "directional"
 noise = 0.05
 dropout = 0.02
+
+[reward]                 # workers: as the best plan-RL run (3.6, guard + coop)
+kind = "multi"
+neighbour_weight = 0.5
+
+[agent]                  # workers: one shared network
+shared = true
 
 [train]
 level_min = 1000.0
