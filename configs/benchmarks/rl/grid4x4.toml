@@ -1,0 +1,41 @@
+# Our RL (step-2 setup: detector state, queue reward, shield) on the grid4x4 benchmark.
+# Every episode replays the scenario's demand (a different training route file).
+#   tsc train configs/benchmarks/rl/grid4x4.toml --seeds 0-2
+#   tsc evaluate configs/benchmarks/grid4x4.toml --runs "outputs/train/rl_grid4x4/s*" --no-baselines --out outputs/eval/rl_grid4x4
+name = "rl_grid4x4"
+workers = 3
+
+[network]
+path = "networks/benchmarks/grid4x4/grid4x4.net.xml"
+rebuild_tls = false      # the scenario's own programs (its fixed-time baseline)
+yellow = 3
+all_red = 0
+min_green = 7
+
+[demand]
+generator = "file"
+route_files = ["networks/benchmarks/grid4x4/grid4x4_*.rou.xml"]
+eval_files = 100          # the last 100 route files: evaluation only
+begin = 0
+duration = 3600
+count_undeparted = true  # as RESCO: vehicles still waiting to enter count in the delay
+
+[signals]
+decision_interval = 10
+max_green = 60           # the step-2 safety shield
+max_red = 90
+
+[observation]            # step 2: detectors with noise / dropout, no messages
+mode = "detector"
+comm = false
+noise = 0.05
+dropout = 0.02
+
+[reward]
+kind = "queue"
+
+[train]
+episodes = 150
+level_min = 1.0          # the demand is the scenario's own
+level_max = 1.0
+val_levels = [1.0]
