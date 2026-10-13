@@ -386,8 +386,13 @@ win Maribor), with RL adding gains on top. Two levels (`[signals] control = "hie
       v3c beats every single expert on the corridor (69.4 vs 73.8 s, matched plans; 99.6 vs
       102.8 s, stale plans) and equals max-pressure on Maribor (83.3 s). Full report:
       [HIERARCHY_REPORT.md](HIERARCHY_REPORT.md).
-- [ ] 2H.5 Expert-specific workers: one worker per expert, trained with that expert always active
+- [x] 2H.5 Expert-specific workers: one worker per expert, trained with that expert always active
       (delay reward), kept only if it beats its expert alone; table rebuilt over expert + worker.
+      Only the corridor green-wave workers passed (2 of 3 seeds); workers on adaptive experts did
+      not. v4 (table over expert + worker): −6.6 % vs the best expert with stale plans. v5 (the
+      table decides per level whether the worker acts, `table_alone`): 67.7 s on the corridor,
+      −8.2 % vs the green wave, below perfect expert selection (68.0 s). Maribor v4: 82.0 s
+      (−1.6 % vs max-pressure).
 - [ ] 2H.6 Table: "does the plan fit" input (stale plans); SUMO's own actuated program as the
       actuated expert.
 - [ ] 2H.4 Imitation warm start; leave-one-network-out test (train on two networks, test on
@@ -476,3 +481,10 @@ uv run tsc diagnose messages configs/step2/evaluate.toml         # do agents use
   on Maribor, and a lookup-table manager (v3c) beats every single expert on the corridor. Two
   worker settings (max-red shield, hold guard) had been handicapping the experts. RL controller
   selection (2G) removed. RESCO benchmark scenarios fetched (`networks/benchmarks/fetch.py`).
+- 2026-10-12/13 (overnight): 2H.5 done (expert workers, v4 / v5; HIERARCHY_REPORT §6).
+  Benchmarks on the 8 RESCO / CoSLight scenarios and handoff improvements 1–3, 5–7
+  ([BENCHMARKS.md](BENCHMARKS.md)). Found on the way: a max-red shield that forces every stage
+  turns max-pressure into a fixed cycle on multi-phase junctions (Cologne 1: 18.5 → 76 s); the
+  call-based shield (`signals.red_call`, per signal link, only for waiting vehicles) fixes it.
+  Also: parallel jobs racing on shared plan files (now an inter-process lock), and an indexing
+  bug on networks with gaps in SUMO link indices (Ingolstadt 21).
