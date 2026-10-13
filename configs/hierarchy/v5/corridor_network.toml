@@ -1,0 +1,53 @@
+# Step 2H: corridor, one expert for all 7 signals
+# Step 2H.5 (v5): lookup manager choosing per level between "expert alone" and "expert + its
+# worker" (worker runs of configs/hierarchy/workers/, same training seed); experts without an
+# accepted worker run alone.
+#   tsc train configs/hierarchy/v5/corridor_network.toml --seeds 0-2
+name = "hier5_corridor_network"
+workers = 12
+
+[network]
+path = "networks/corridor/corridor.net.xml"
+
+[demand]
+generator = "od"
+major_share = 0.6
+tidal_share = 0.7
+tidal_random = true
+
+[signals]
+control = "hierarchy"
+decision_interval = 5    # workers decide every 5 s of green; the expert acts every second
+max_extension = 20
+experts = ["greenwave", "coord_actuated", "maxpressure", "actuated"]
+actuated_loops = "sumo"
+
+[hierarchy]
+scope = "network"
+interval = 300
+worker = "expert"
+worker_runs = { greenwave = "outputs/train/wk_corridor_greenwave/s{seed}", coord_actuated = "outputs/train/wk_corridor_coord_actuated/s{seed}" }
+manager = "table"
+table_scenarios = 10
+hysteresis = 2
+table_alone = true       # also each expert without its worker: the workers help at some levels only
+
+[observation]
+mode = "detector"
+comm = true
+message = "directional"
+noise = 0.05
+dropout = 0.02
+
+[reward]                 # unused here (nothing is trained in this run)
+kind = "multi"
+neighbour_weight = 0.5
+
+[agent]                  # must match the worker runs (shared network + junction one-hot)
+shared = true
+
+[train]
+level_min = 1000.0
+level_max = 5000.0
+val_levels = [1500.0, 3000.0, 4500.0]
+plan_match = 0.5

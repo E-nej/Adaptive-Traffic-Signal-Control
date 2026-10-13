@@ -1,6 +1,6 @@
 # Step 2H: hierarchical control. Results and what we changed
 
-*2026-10-12, branch `2h-hierarchy`. All delays are mean delay per vehicle [s], 10 held-out
+*2026-10-12/13, branch `2h-hierarchy`. All delays are mean delay per vehicle [s], 10 held-out
 evaluation scenarios per demand level, every controller on the same scenarios (paired
 comparisons, Wilcoxon p < 0.05 = significant).*
 
@@ -28,6 +28,13 @@ comparisons, Wilcoxon p < 0.05 = significant).*
    shield and a plan hold guard, both meant for RL, that the baselines do not have. They cost
    max-pressure 5.5 % and coordinated-actuated up to 53 %. Without them the hierarchy's experts
    equal their baselines exactly (§5, v3c).
+6. **Expert-specific workers, trained separately (§6).** Of 12 worker runs, only the corridor
+   green-wave workers beat their expert on fresh scenarios (−21 % and −15 %, 2 of 3 seeds). On
+   adaptive experts the workers learned nothing useful.
+   - **v4** (table over expert + worker): −6.6 % vs the best expert with stale plans.
+   - **v5** (the table picks per level whether the worker acts): **67.7 s on the corridor,
+     −8.2 % vs the green wave**, below the 68.0 s that perfect expert selection could reach.
+   - **Maribor: 82.0 s**, −1.6 % vs max-pressure (no worker accepted).
 
 ## 1. The first round (configs/hierarchy/*.toml, as requested)
 
@@ -217,20 +224,97 @@ max-pressure at 7000–8000 veh/h, where SUMO's actuated control does.
 **The hierarchy now meets the target: at least as good as the best single expert in every
 setting, and better overall on the corridor (−6 % matched, −3 % stale plans).**
 
-## 6. What this means
+## 6. Expert-specific workers (2H.5): v4 and v5
+
+The two levels trained separately, as proposed:
+
+- **Workers:** one per expert (green wave and coordinated-actuated on the corridor; max-pressure
+  and actuated on Maribor). Each is trained with its expert always active, at every demand level:
+  manager fixed, residual worker (AGREE / HOLD / SWITCH), `delay` reward + 0.5 × neighbours,
+  300 episodes, 3 seeds (`configs/hierarchy/workers/`).
+- **Acceptance:** each run starts from its expert alone as the `best` checkpoint, and keeps the
+  worker only if it beats the expert on fresh scenarios (4 per level, one-sided Wilcoxon
+  p < 0.05).
+- **Table:** rebuilt over "expert + its worker". v4 uses only that pair; v5 (`table_alone`) also
+  measures each expert alone and picks per level.
+
+**Acceptance of the workers (change in delay vs the expert alone, fresh scenarios):**
+
+| worker | seed 0 | seed 1 | seed 2 |
+|---|---|---|---|
+| corridor, green wave | **−21.3 % (p = 0.004)** | **−14.7 % (p = 0.017)** | −5.7 % (p = 0.58) |
+| corridor, coordinated-actuated | +1.9 % | +2.8 % | 0.0 % |
+| Maribor, max-pressure | −4.0 % (p = 0.87) | +2.0 % | +2.9 % |
+| Maribor, actuated | 0.0 % | 0.0 % | 0.0 % |
+
+Only the corridor green-wave workers passed (2 of 3 seeds). They fine-tune a fixed plan, as
+the plan-RL of step 2F did. Workers on top of adaptive experts (coordinated-actuated,
+max-pressure, actuated) learned nothing that beat their expert.
+
+**v4 results** (table over expert + worker):
+
+| setting | best single expert | v3c (table, no workers) | **v4** |
+|---|---|---|---|
+| corridor, matched plans | 73.8 (green wave) | 69.4 | **69.6 (−5.6 %)** |
+| corridor, opposite plans | 102.8 (actuated) | 99.6 | **96.1 (−6.6 %, significant)** |
+| Maribor | 83.3 (max-pressure) | 83.3 | **82.0 (−1.6 %)** |
+
+v3c is one table (seed 0), v4 three (seeds 0–2, each with that seed's workers). v4 vs v3c
+per level, corridor, matched plans: −11.0 % at 1000 veh/h, +5.8 / +3.2 / +8.3 % at
+2000 / 3000 / 4000 (all significant), −3.5 % at 5000.
+
+- **Opposite plans:** v4 is better than v3c at every level (−3.6 % overall, significant). There
+  the green-wave worker repairs a stale plan, the case it was trained for.
+- **Matched plans:** the worker helps at the lowest and highest demand and hurts in between. The
+  acceptance test pools all levels, so it cannot see this.
+- **Maribor:** no worker was accepted, so v4 is the table over the experts alone. Its 1.6 % gain
+  over v3c (one seed) comes from where its three tables switch to actuated: from 6500, 7250 and
+  8000 veh/h, vs v3c only at 8000. Within the noise of the table measurement, not a worker
+  effect.
+
+**v5** lets the table pick per level between "green wave" and "green wave + worker"
+(`table_alone = true`, `configs/hierarchy/v5/`).
+
+- **Seed 0:** the table uses the worker at 1000–1500 veh/h, where it lowers the green wave's
+  delay from about 50 to 31–34 s, below max-pressure; the green wave alone at 2000–3500.
+- **Seed 1:** the worker is never picked.
+- **Seed 2:** no accepted worker.
+
+| corridor | 1000 | 2000 | 3000 | 4000 | 5000 | mean |
+|---|---|---|---|---|---|---|
+| green wave (best single expert) | 51.6 | 50.0 | 57.7 | 73.5 | 136.0 | 73.8 |
+| v3c (table, no workers) | 46.7 | 52.1 | 57.7 | 70.4 | 120.0 | 69.4 |
+| v4 (table over expert + worker) | 41.6 | 55.1 | 59.5 | 76.2 | 115.7 | 69.6 |
+| **v5 (table, worker per level)** | **41.6** | 51.9 | 57.9 | 72.1 | **115.2** | **67.7** |
+| *perfect expert per level (no workers)* | | | | | | *68.0* |
+
+- **Matched plans:** v5 is **−8.2 % vs the green wave** (significant). That is −2.7 % vs v4
+  (significant) and −2.4 % vs v3c (not significant).
+- **Below the per-level limit:** v5 is under the 68.0 s that perfect expert selection alone
+  could reach. The worker adds what selection cannot.
+- **Opposite plans:** 98.3 s, between v3c (99.6) and v4 (96.1); +2.3 % vs v4 (significant).
+  The table is measured with matching plans, so it drops the worker at 2000–3000 veh/h,
+  exactly where it would repair a stale plan.
+- **What would fix that:** a plan-fit input (table rows measured with stale plans too).
+
+## 7. What this means
 
 - An end-to-end two-level RL hierarchy is worse than the classic controllers, and training longer does not fix it.
 - With the reward aligned to delay, a safe default, acceptance on fresh scenarios and decoupled
   levels, it reaches the best classic controller. The remaining gains come from **structure**
   (which expert, where and at which demand) more than from deeper RL.
+- **Expert-specific workers** (trained separately, accepted on fresh scenarios, used by the
+  table only at levels where they help) are the first thing that beats *perfect* expert
+  selection: v5, 67.7 vs 68.0 s. They only help on top of a fixed plan (the green wave). On
+  adaptive experts they learned nothing useful.
 - **Next:**
-  1. a "does the plan fit" input for the table (stale plans), and handing a junction to SUMO's
-     own actuated program while that expert is active (Maribor at 7000–8000);
-  2. a table per group (combine v2 group's spatial mix with the per-level choice);
-  3. **expert-specific workers**: one worker per expert, trained with that expert always active
-     and the delay reward, kept only if it beats its expert alone, then the table rebuilt over
-     "expert + its worker". The plan-RL results of step 2F (−10 to −29 % vs a stale plan on the
-     corridor) say where workers can win.
+  1. a "does the plan fit" input for the table (rows measured with stale plans too), so it
+     keeps the worker where it repairs a stale plan (v4's −3.6 % there);
+  2. handing a junction to SUMO's own actuated program while that expert is active (Maribor at
+     7000–8000);
+  3. a table per group (combine v2 group's spatial mix with the per-level choice);
+  4. workers accepted per level instead of pooled, and more worker seeds: 1 of 3 corridor
+     seeds produced a worker the table uses.
 
 ## Reproduce
 
@@ -241,5 +325,8 @@ uv run tsc accept "outputs/train/hier2_corridor_network/s*" --scenarios 6
 uv run tsc train configs/hierarchy/v3c/corridor_network.toml --seeds 0   # table (also maribor_network)
 uv run tsc evaluate configs/hierarchy/evaluate_corridor.toml --runs "outputs/train/hier3c_corridor_network/s*"
 uv run tsc evaluate configs/hierarchy/evaluate_maribor.toml
+uv run tsc train configs/hierarchy/workers/corridor_greenwave.toml --seeds 0-2   # workers (also the other 3)
+uv run tsc train configs/hierarchy/v5/corridor_network.toml --seeds 0-2          # table + workers (v4: also maribor)
+uv run tsc evaluate configs/hierarchy/evaluate_corridor.toml --runs "outputs/train/hier5_corridor_network/s*" --no-baselines
 uv run tsc compare outputs/eval/hier_maribor/results.csv --ref maxpressure_det
 ```

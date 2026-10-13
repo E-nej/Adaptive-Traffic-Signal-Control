@@ -35,12 +35,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Cooperative reward (`reward.neighbour_weight`): r_i + α·Σ r_neighbours.
 
+- Expert-specific workers (2H.5): `[hierarchy] worker = "expert"` with `worker_runs` (each
+  expert's worker from its own run, `configs/hierarchy/workers/`), `table_alone` (the table
+  decides per level whether the worker acts); configs `configs/hierarchy/v4/`, `v5/`.
+- Benchmark scenarios (`configs/benchmarks/`): demand from route files (`demand.generator =
+  "file"`, `route_files`, `begin`, `count_undeparted`), the scenario's own signal programs,
+  `trip_time` metric; results in `docs/BENCHMARKS.md`.
+- `advanced_mp` baseline (Advanced-MP, Zhang et al. 2022; `signals.amp_weight`, `amp_range`).
+- `observation.approach_length`: a second, longer area detector; vehicles moving toward the
+  stop line become a state feature.
+- `agent.smdp` (time-based discounting, γ per second), `agent.dueling`, `agent.n_step`.
+- Reward `queue_pressure` (`reward.pressure_weight`).
+- `signals.red_call`: the max-red shield per signal link and only for links where a detector
+  reports a waiting vehicle.
+- `tsc accept` for worker runs; inter-process file lock for files parallel jobs share
+  (`sumo_env.file_lock`).
+
 ### Removed
 - RL controller selection per junction (2G: `[signals] control = "select"`, `select_interval`,
   `configs/select/*_comm*`, `*_nocomm*`): it failed on the corridor and on Maribor and the
   hierarchy replaces it. The expert machinery (`controllers.select.ExpertPool`, renamed from
   `SelectorActions`) and the best fixed assignment (`tsc assign`) stay. Earlier runs'
   `select_interval` is ignored when loading (`config.RETIRED`).
+
+### Fixed
+- Directional messages on networks with gaps in SUMO's link indices (Ingolstadt 21).
+- Parallel jobs no longer race on the evaluation routes / plans and the static network.
 
 ### Changed
 - Rewards, the queue metric and exact-count max-pressure cover whole approaches, including
