@@ -26,7 +26,8 @@ def sim_kwargs(cfg):
     # plan control switches on the plan's second; the policy still decides every interval
     interval = 1 if cfg.signals.control in PLAN_CONTROLS else cfg.signals.decision_interval
     return dict(decision_interval=interval, max_green=cfg.signals.max_green,
-                max_red=cfg.signals.max_red, e2_length=cfg.observation.e2_length,
+                max_red=cfg.signals.max_red, red_call=cfg.signals.red_call,
+                e2_length=cfg.observation.e2_length,
                 begin=cfg.demand.begin, undeparted=cfg.demand.count_undeparted,
                 approach_length=cfg.observation.approach_length)
 

@@ -13,7 +13,7 @@ GREEN, YELLOW, ALL_RED = 'green', 'yellow', 'all_red'
 
 class SignalHead:
     def __init__(self, greens, apply, yellow=3, all_red=2,
-                 min_green=10, decision_interval=5, max_green=None, max_red=None):
+                 min_green=10, decision_interval=5, max_green=None, max_red=None, calls=None):
         self.greens = greens
         self.apply = apply
         self.yellow = yellow
@@ -22,6 +22,8 @@ class SignalHead:
         self.decision_interval = decision_interval
         self.max_green = max_green
         self.max_red = max_red
+        self.calls = calls       # calls(link): a vehicle waits at signal link `link` (or None)
+        self.servable = {j for g in greens for j, c in enumerate(g) if c in 'Gg'}
         self.reset()
 
     def reset(self):
@@ -31,6 +33,7 @@ class SignalHead:
         self.timer = 0           # seconds spent in the current mode
         self.clock = 0
         self.green_end = [0] * len(self.greens)   # when each stage last lost its green
+        self.link_end = [0] * len(self.greens[0])  # ... each signal link (with calls)
         self.forced = 0          # number of shield overrides (max green / max red)
         self._apply(self.greens[0])
 
@@ -46,10 +49,19 @@ class SignalHead:
         """Hold the current green (same stage) or start switching to another stage.
 
         The shield overrides the request when a stage has been red longer than
-        max_red, or the current green would exceed max_green.
+        max_red, or the current green would exceed max_green.  With `calls` the max-red
+        rule is per signal link: a link no stage has served for max_red while a vehicle
+        waits at it is starved, and the stage serving the most starved links runs.
         """
         chosen = stage
-        if self.max_red is not None:
+        if self.max_red is not None and self.calls is not None:
+            now = self.greens[self.stage]
+            starved = [j for j, c in enumerate(now) if c not in 'Gg' and j in self.servable
+                       and self.clock - self.link_end[j] >= self.max_red and self.calls(j)]
+            if starved:
+                stage = max(range(len(self.greens)),
+                            key=lambda i: sum(self.greens[i][j] in 'Gg' for j in starved))
+        elif self.max_red is not None:
             starved = [i for i in range(len(self.greens))
                        if i != self.stage and self.clock - self.green_end[i] >= self.max_red]
             if starved:
@@ -62,6 +74,9 @@ class SignalHead:
         if stage == self.stage:
             return
         self.green_end[self.stage] = self.clock
+        for j, c in enumerate(self.greens[self.stage]):
+            if c in 'Gg':
+                self.link_end[j] = self.clock
         self.next_stage = stage
         self.mode = YELLOW
         self.timer = 0

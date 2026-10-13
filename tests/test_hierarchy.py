@@ -301,7 +301,7 @@ def test_default_expert_fallback(corridor, work_root):
 def test_table_look_up_and_hysteresis(corridor):
     from tsc.controllers.hierarchy import Manager, make_groups
     m = Manager(corridor, make_groups(corridor, 'network', 400.0), 3, policy='table')
-    m.table = [((0.1, 0.0), 0), ((0.3, 0.1), 1), ((0.35, 0.6), 2)]
+    m.table = [((0.1, 0.0), 0, True), ((0.3, 0.1), 1, True), ((0.35, 0.6), 2, False)]
     m.hysteresis = 2
     m.choice, m.candidate, m.streak, m.flows = [0], None, 0, [None]
     m._look_up((0.29, 0.12))
@@ -309,13 +309,13 @@ def test_table_look_up_and_hysteresis(corridor):
     m._look_up((0.34, 0.55))
     assert m.choice == [1]                       # past saturation: jam picks expert 2 ...
     m._look_up((0.36, 0.65))
-    assert m.choice == [2]                       # ... after two decisions in a row
+    assert m.choice == [2] and not m.worker_on   # ... after two decisions in a row
     m._look_up((0.09, 0.01))
     m._look_up((0.36, 0.65))
     assert m.choice == [2]                       # a one-off reading does not switch
 
     # keys per interval: the k-th reading is compared with the levels' k-th readings
-    m.table = [([(0.05, 0.0), (0.1, 0.0)], 0), ([(0.1, 0.0), (0.3, 0.1)], 1)]
+    m.table = [([(0.05, 0.0), (0.1, 0.0)], 0, True), ([(0.1, 0.0), (0.3, 0.1)], 1, True)]
     m.choice, m.candidate, m.streak, m.flows = [1], None, 0, [None]
     m._look_up((0.1, 0.0))
     assert m.choice == [1]                       # 1st reading: like level 1 filling up
@@ -345,7 +345,7 @@ def test_table_manager(corridor, work_root):
     best = df.loc[df.groupby('level').delay.idxmin()].set_index('level').expert
     policy, _ = load_policy(out, corridor, 'best')
     table = policy.actions.manager.table
-    assert [policy.actions.names[e] for _, e in table] == list(best)
+    assert [policy.actions.names[e] for _, e, _ in table] == list(best)
     assert table[0][0][:, 0].mean() < table[1][0][:, 0].mean()   # more demand, more flow
     assert len(table[0][0]) == 300 // 60         # one key per interval
 
@@ -403,6 +403,20 @@ def test_expert_workers(corridor, work_root):
     assert policy.agents[tl].act(state, mask) == AGREE
     actions.manager.choice = [1] * len(actions.manager.groups)  # actuated: its worker acts
     assert policy.agents[tl].act(state, mask) == worker.act(state, mask)
+    actions.manager.worker_on = False                           # unless the table says so
+    assert policy.agents[tl].act(state, mask) == AGREE
+
+    # table_alone: actuated is measured with and without its worker, the table picks
+    import pandas as pd
+    alone = config_mod.replace(tcfg, name='wk_table_alone', hierarchy={'table_alone': True})
+    train_one(alone, run + '_alone')
+    df = pd.read_csv(os.path.join(run + '_alone', 'table.csv'))
+    assert set(df.expert) == {'maxpressure', 'actuated', 'actuated+worker'}
+    best = df.loc[df.groupby('level').delay.idxmin()].set_index('level').expert
+    policy, _ = load_policy(run + '_alone', corridor, 'best')
+    names = policy.actions.names
+    assert [names[e] + ('+worker' if w and names[e] == 'actuated' else '')
+            for _, e, w in policy.actions.manager.table] == list(best)
     with pytest.raises(ValueError, match='expert'):
         train_one(config_mod.replace(tcfg, hierarchy={'manager': 'learned'}), run + '_x')
 

@@ -142,8 +142,10 @@ class Manager:
         self.default = None     # expert run unless another one is better by `margin`
         self.margin = 0.0
         self.forced = None      # expert run everywhere, whatever the Q-values (fallback)
-        self.table = []         # policy 'table': [([(flow, jam) per interval], expert)]
+        self.table = []         # policy 'table': [([(flow, jam) per interval], expert,
+                                #                   worker on)]
         self.hysteresis = 2
+        self.worker_on = True   # table: the active expert's worker acts
 
     def reset(self, sim):
         self.sensor.reset()
@@ -161,6 +163,7 @@ class Manager:
         self.counts = np.zeros(self.n_experts)
         self.flows = []                 # network (flow, jam) of every interval (table building)
         self.candidate, self.streak = None, 0
+        self.worker_on = True           # table: the active expert's worker acts
         self._decide()
 
     def tick(self, sim):
@@ -211,16 +214,17 @@ class Manager:
 
     def _look_up(self, flow):
         i = len(self.flows) - 1                   # this reading's index in the episode
-        keys = [np.atleast_2d(k) for k, _ in self.table]    # one (flow, jam): every interval
+        keys = [np.atleast_2d(entry[0]) for entry in self.table]   # one (flow, jam): every interval
         keys = np.array([k[min(i, len(k) - 1)] for k in keys])
         scale = np.maximum(keys.max(axis=0) - keys.min(axis=0), 1e-6)
         dist = np.abs((keys - np.asarray(flow)) / scale).sum(axis=1)
-        expert = self.table[int(np.argmin(dist))][1]
+        _, expert, worker = self.table[int(np.argmin(dist))]
         first = self.candidate is None
-        self.streak = self.streak + 1 if expert == self.candidate else 1
-        self.candidate = expert
+        self.streak = self.streak + 1 if (expert, worker) == self.candidate else 1
+        self.candidate = (expert, worker)
         if first or self.streak >= self.hysteresis:
             self.choice = [expert] * len(self.groups)
+            self.worker_on = worker
 
     def _act(self, state, mask):
         """Epsilon-greedy; with a default expert the greedy choice leaves the default only
@@ -350,7 +354,7 @@ class HierarchyActions:
         meta = {'default': None if m.default is None else self.names[m.default],
                 'forced': None if m.forced is None else self.names[m.forced],
                 'agree': self.force_agree,
-                'table': [[np.asarray(k).tolist(), self.names[e]] for k, e in m.table]}
+                'table': [[np.asarray(k).tolist(), self.names[e], w] for k, e, w in m.table]}
         with open(os.path.join(run_dir, f'{which}_hierarchy.json'), 'w') as f:
             json.dump(meta, f)
 
@@ -366,7 +370,8 @@ class HierarchyActions:
             self.set_default(self.names.index(meta['default']))
         self.manager.forced = None if meta['forced'] is None else self.names.index(meta['forced'])
         self.force_agree = meta['agree']
-        self.manager.table = [(np.asarray(k), self.names.index(n)) for k, n in meta.get('table', [])]
+        self.manager.table = [(np.asarray(t[0]), self.names.index(t[1]), t[2] if len(t) > 2 else True)
+                              for t in meta.get('table', [])]
 
     # training hooks ---------------------------------------------------
 
@@ -519,7 +524,7 @@ class ExpertWorker:
 
     def act(self, state, mask, epsilon=0.0):
         agents = self.actions.expert_workers.get(self.actions.expert(self.tl_id))
-        if agents is None or self.actions.force_agree:
+        if agents is None or self.actions.force_agree or not self.actions.manager.worker_on:
             return AGREE
         return agents[self.tl_id].act(state, mask, 0.0)
 

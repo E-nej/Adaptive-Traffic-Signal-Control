@@ -205,16 +205,16 @@ TABLE_EPISODE = 90000       # table scenarios: training seeds, episodes 90000+ (
 
 
 def _table_task(task):
-    """One expert alone (workers agreeing) on one scenario: (level, expert, delay,
-    [(flow, jam) of every interval])."""
-    cfg, level, k, expert, work_dir = task
+    """One expert (with its worker if `worker`) on one scenario: (level, expert, delay,
+    [(flow, jam) of every interval], worker)."""
+    cfg, level, k, expert, worker, work_dir = task
     network = network_for(cfg)
     (seed,) = cfg.train.seeds
     route_seed = seeds_mod.train(seed, TABLE_EPISODE + k)
     controller = make_controller(network, make_observer(network, cfg, seed), cfg)
-    controller.actions.force(expert, agree=cfg.hierarchy.worker != 'expert')   # + its worker
+    controller.actions.force(expert, agree=not worker)
     controller.reseed(route_seed)
-    run_dir = os.path.join(work_dir, f'table_{level:.0f}_{k}_{expert}')
+    run_dir = os.path.join(work_dir, f'table_{level:.0f}_{k}_{expert}{"w" if worker else ""}')
     os.makedirs(run_dir, exist_ok=True)
     route = generate_routes(network, cfg.demand, os.path.join(run_dir, 'r.rou.xml'), route_seed, level)
     if cfg.signals.control in PLAN_CONTROLS:
@@ -223,25 +223,34 @@ def _table_task(task):
         controller.set_plans(library[(nearest_level(cfg.train.plan_levels, level), flip)])
     m = run_episode(network, controller, route, cfg.demand.duration, run_dir, seed=route_seed,
                     **sim_kwargs(cfg))
-    return level, expert, m['delay'], [list(f) for f in controller.actions.manager.flows]
+    return (level, expert, m['delay'], [list(f) for f in controller.actions.manager.flows],
+            worker)
 
 
 def build_table(cfg, greedy, out_dir, label):
     """Manager 'table': every expert (with its worker, worker = 'expert') at every level of
     the grid (table_scenarios scenarios with matching plans), the best one per level by mean delay, keyed by the network flow
     and jam ratio the manager measured at that level in each interval (mean over experts
-    and scenarios).  Saves it as the 'best' and 'final' policy and the measurements as
-    table.csv (delays) and table_keys.csv (readings)."""
+    and scenarios).  With table_alone, an expert that has a worker is also measured without
+    it, and the table picks per level.  Saves it as the 'best' and 'final' policy and the
+    measurements as table.csv (delays) and table_keys.csv (readings)."""
     import pandas as pd
     h, tc = cfg.hierarchy, cfg.train
     levels = h.table_levels or list(np.linspace(tc.level_min, tc.level_max, 9))
     actions = greedy.actions
     work_dir = os.path.join(out_dir, 'work')
-    tasks = [(cfg, float(lv), k, e, work_dir) for lv in levels for k in range(h.table_scenarios)
-             for e in range(len(actions.names))]
+    with_worker = h.worker == 'expert'
+    options = [(e, with_worker) for e in range(len(actions.names))]
+    if with_worker and h.table_alone:
+        options += [(e, False) for e in sorted(actions.expert_workers)]
+    tasks = [(cfg, float(lv), k, e, w, work_dir) for lv in levels
+             for k in range(h.table_scenarios) for e, w in options]
     results = list(run_parallel(_table_task, tasks, cfg.workers))
-    df = pd.DataFrame([r[:3] for r in results], columns=['level', 'expert', 'delay'])
-    df['expert'] = [actions.names[e] for e in df.expert]
+    # an expert without a worker runs alone either way: one option, named after the expert
+    def option(e, w):
+        return actions.names[e] + ('+worker' if w and e in actions.expert_workers else '')
+    df = pd.DataFrame([(r[0], option(r[1], r[4]), r[2]) for r in results],
+                      columns=['level', 'expert', 'delay'])
     df.sort_values(['level', 'expert']).to_csv(os.path.join(out_dir, 'table.csv'), index=False)
     mean = df.groupby(['level', 'expert']).delay.mean().unstack()
     best = mean.idxmin(axis=1)
@@ -249,9 +258,12 @@ def build_table(cfg, greedy, out_dir, label):
                             columns=['level', 'interval', 'flow', 'jam'])
     keys = readings.groupby(['level', 'interval'])[['flow', 'jam']].mean()
     keys.to_csv(os.path.join(out_dir, 'table_keys.csv'))
-    table = [(keys.loc[lv].to_numpy(), actions.names.index(best[lv])) for lv in mean.index]
+    def parse(name):
+        expert = name.removesuffix('+worker')
+        return actions.names.index(expert), name.endswith('+worker') or not with_worker
+    table = [(keys.loc[lv].to_numpy(), *parse(best[lv])) for lv in mean.index]
     actions.manager.table = table
-    actions.set_default(actions.names.index(best.value_counts().idxmax()))
+    actions.set_default(parse(best.value_counts().idxmax())[0])
     for which in ('best', 'final'):
         greedy.save(out_dir, which)
     print(f'[{label}] table (level: mean flow, jam -> expert): '
