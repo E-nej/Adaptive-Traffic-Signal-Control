@@ -71,6 +71,8 @@ class SignalConfig:
                                       # 'upstream' (where SUMO's actuated control has them)
     max_green: int | None = None      # s, safety shield (None = off)
     max_red: int | None = None        # s, safety shield (None = off)
+    red_call: bool = False            # max_red only for stages a detector reports a vehicle
+                                      # waiting for (else every stage is served in time)
     amp_weight: float = 1.0           # advanced_mp: keep the green while weight x moving
     amp_range: float = 100.0          # vehicles within amp_range m >= the highest pressure
 
@@ -87,6 +89,8 @@ class HierarchyConfig:
                                       # 9 levels from train.level_min to level_max)
     table_scenarios: int = 3          # 'table': scenarios per level and expert
     hysteresis: int = 2               # 'table': decisions in a row before a switch
+    table_alone: bool = False         # 'table' + worker 'expert': also measure every expert
+                                      # without its worker; the table picks per level
     fixed_expert: int = 0             # index into [signals] experts
     worker: str = 'off'               # 'off': junctions run the chosen expert unmodified;
                                       # 'residual': per-junction RL fine-tunes it

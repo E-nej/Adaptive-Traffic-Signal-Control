@@ -74,6 +74,19 @@ def test_max_red_serves_the_longest_starved_stage():
     assert head.mode == YELLOW and head.next_stage in (1, 2) and head.forced == 1
 
 
+def test_max_red_with_calls_serves_waiting_links_only():
+    greens = ['GGrr', 'rGGr', 'rrrG']     # link 1 is green in stages 0 and 1
+    head = SignalHead(greens, lambda s: None, yellow=3, all_red=2, max_red=30,
+                      calls=lambda link: link in (1, 3))
+    run(head, 30)
+    head.request(0)          # link 1 is served by stage 0 itself; link 3 waits for stage 2
+    assert head.mode == YELLOW and head.next_stage == 2 and head.forced == 1
+    quiet = SignalHead(greens, lambda s: None, max_red=30, calls=lambda link: False)
+    run(quiet, 30)
+    quiet.request(0)         # no calls: the agent keeps its green
+    assert quiet.mode == GREEN and quiet.forced == 0
+
+
 def test_green_time():
     head, _ = make()
     run(head, 12)

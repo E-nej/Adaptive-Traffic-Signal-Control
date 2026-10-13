@@ -11,7 +11,7 @@ tls modes
 import os
 
 from tsc import metrics, sumo_env
-from tsc.detectors import detector_file
+from tsc.detectors import detector_file, e2_id
 from tsc.signals import SignalHead
 
 TLS_MODES = ('fixed', 'webster', 'actuated', 'python')
@@ -20,7 +20,8 @@ TLS_MODES = ('fixed', 'webster', 'actuated', 'python')
 class Simulation:
     def __init__(self, network, route_file, duration, out_dir, seed=0, tls='python',
                  additional=None, gui=False, decision_interval=5, max_green=None, max_red=None,
-                 e2_length=50.0, begin=0, undeparted=False, approach_length=0.0):
+                 e2_length=50.0, begin=0, undeparted=False, approach_length=0.0,
+                 red_call=False):
         if tls not in TLS_MODES:
             raise ValueError(f'Unknown tls mode: {tls!r}')
         self.network = network
@@ -57,6 +58,7 @@ class Simulation:
             additional.append(detector_file(network, e2_length, approach_length))
         if additional:
             self.cmd += ['-a', ','.join(additional)]
+        self.red_call = red_call
         self._head_args = dict(yellow=network.yellow, all_red=network.all_red,
                                min_green=network.min_green, decision_interval=decision_interval,
                                max_green=max_green, max_red=max_red)
@@ -73,10 +75,19 @@ class Simulation:
             self.heads = {
                 tl_id: SignalHead(self.network.greens[tl_id],
                                   lambda state, tl_id=tl_id: set_state(tl_id, state),
+                                  calls=self._calls(tl_id) if self.red_call else None,
                                   **self._head_args)
                 for tl_id in self.network.tl_ids
             }
         return self
+
+    def _calls(self, tl_id):
+        """Detector calls of junction tl_id (red_call): is a vehicle on the area detector
+        of the lane at signal link `link`?  Like the recall of actuated control, max_red
+        then only serves movements someone waits for."""
+        lane = {idx: in_lane for idx, in_lane, _ in self.network.links[tl_id]}
+        count = self.api.lanearea.getLastStepVehicleNumber
+        return lambda link: link in lane and count(e2_id(lane[link])) > 0
 
     def decision_points(self):
         return [tl_id for tl_id, h in self.heads.items() if h.ready()]
