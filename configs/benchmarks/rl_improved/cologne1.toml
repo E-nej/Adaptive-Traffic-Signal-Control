@@ -24,6 +24,7 @@ count_undeparted = true  # as RESCO: vehicles still waiting to enter count in th
 decision_interval = 10
 max_green = 60           # the step-2 safety shield
 max_red = 90
+red_call = true          # the shield only serves movements a detector reports a vehicle at
 
 [observation]            # step 2: detectors with noise / dropout, no messages
 mode = "detector"

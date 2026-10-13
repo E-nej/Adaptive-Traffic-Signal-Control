@@ -23,6 +23,8 @@ count_undeparted = true  # as RESCO: vehicles still waiting to enter count in th
 decision_interval = 10
 max_red = 90             # starvation shield: without it max-pressure gridlocks on the real
                          # Cologne maps (an approach left on red > 300 s is teleported)
+red_call = true          # ... but only for movements a detector reports a vehicle waiting at
+                         # (a shield that forces every stage is a fixed cycle on Cologne 1)
 
 [observation]
 mode = "detector"
