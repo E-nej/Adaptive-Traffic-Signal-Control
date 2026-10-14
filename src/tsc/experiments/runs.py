@@ -66,7 +66,7 @@ def make_observer(network, cfg, seed):
     o = cfg.observation
     return Observer(network, mode=o.mode, comm=o.comm, noise=o.noise, dropout=o.dropout,
                     seed=seed, e2_length=o.e2_length, message=o.message,
-                    approach_length=o.approach_length)
+                    approach_length=o.approach_length, layout=o.layout)
 
 
 def load_policy(run_dir, network, which='best'):
@@ -82,4 +82,5 @@ def make_controller(network, observer, cfg, epsilon=0.0):
     from tsc.controllers.rl import RLController, make_actions, make_agents
     actions = make_actions(network, observer, cfg)
     agents = make_agents(network, observer, cfg.agent, actions)
-    return RLController(agents, observer, epsilon, actions=actions, shared=cfg.agent.shared)
+    return RLController(agents, observer, epsilon, actions=actions,
+                        shared=cfg.agent.shared and not cfg.agent.phase_net)

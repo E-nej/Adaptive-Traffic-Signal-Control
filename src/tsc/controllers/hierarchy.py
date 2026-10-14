@@ -285,7 +285,7 @@ class HierarchyActions:
                                    max_extension=s.max_extension, noise=o.noise,
                                    dropout=o.dropout, e2_length=o.e2_length, seed=seed,
                                    experts=s.experts, actuated_loops=s.actuated_loops,
-                                   hold_guard=s.hold_guard)
+                                   hold_guard=s.hold_guard, rl_runs=s.rl_experts)
         self.names = self.selector.names
         self.n_actions = N_WORKER_ACTIONS if self.has_workers else 1
         self.extra_dim = len(self.names) + 2 + PlanActions.extra_dim if self.has_workers else 0

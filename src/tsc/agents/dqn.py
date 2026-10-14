@@ -1,6 +1,8 @@
 """DQN agent with switchable Double DQN / target-update variants (for ablations).
 
-Optional extras: a dueling head (V + A - mean A) and n-step returns.
+Optional extras: a dueling head (V + A - mean A), n-step returns, a residual head
+anchored at a reference action (V + A - A[ref], A starting at zero), and a phase-wise
+network (FRAP / MPLight style) that scores every green stage with shared weights.
 
 Same network as the paper (Dense 400 linear → Dense 400 ReLU → linear).
 The soft (Polyak) target update is applied after every gradient step, as is
@@ -24,11 +26,28 @@ tf.config.threading.set_inter_op_parallelism_threads(_threads)
 from tensorflow import keras  # noqa: E402
 
 
-def build_qnet(n_in, n_out, hidden=(400, 400), dueling=False):
+def build_qnet(n_in, n_out, hidden=(400, 400), dueling=False, ref_action=-1):
     """The paper's network: first hidden layer linear, the others ReLU, linear output.
 
     dueling: the output is V(s) + A(s, a) - mean_a A(s, a) (Wang et al. 2016).
+    ref_action >= 0: Q(s, ref) = V(s) and Q(s, a) = V(s) + A(s, a) for the other actions,
+    with the advantage layer initialised to zero.  All actions start with the same value and
+    argmax ties go to the lowest index, so with ref_action = 0 the untrained policy takes
+    action 0 (a worker's AGREE: it starts as its expert, as in residual policy learning).
+    V is learned from every transition, an action's advantage only from that action's
+    transitions, so untried actions do not look better (or worse) than the reference just
+    because V has moved.
     """
+    if ref_action >= 0:
+        x = inp = keras.Input(shape=(n_in,))
+        for i, units in enumerate(hidden):
+            x = keras.layers.Dense(units, activation=None if i == 0 else 'relu')(x)
+        v = keras.layers.Dense(1)(x)
+        adv = keras.layers.Dense(n_out, kernel_initializer='zeros', bias_initializer='zeros')(x)
+        keep = np.ones((1, n_out), dtype='float32')
+        keep[0, ref_action] = 0.0                # the reference action has no advantage
+        out = v + adv * keep
+        return keras.Model(inp, out)
     if dueling:
         x = inp = keras.Input(shape=(n_in,))
         for i, units in enumerate(hidden):
@@ -44,6 +63,26 @@ def build_qnet(n_in, n_out, hidden=(400, 400), dueling=False):
     return keras.Sequential(layers)
 
 
+def build_phase_qnet(n_stages, n_feats, hidden=(64, 64)):
+    """Phase-wise Q-network (FRAP, Zheng et al. 2019; MPLight, Chen et al. 2020).
+
+    Input (n_stages, n_feats): one row per green stage (observation layout 'phase').  Every
+    stage is embedded by the same MLP; its Q-value comes from its own embedding and the mean
+    embedding of all stages (the competition between stages).  The weights do not depend on
+    the junction, its orientation or its number of stages, so one network serves every
+    junction (padded stages are masked by the agent).
+    """
+    x = keras.Input(shape=(n_stages, n_feats))
+    h = x
+    for units in hidden:
+        h = keras.layers.Dense(units, activation='relu')(h)
+    ctx = keras.ops.mean(h, axis=1, keepdims=True) * keras.ops.ones_like(h[:, :, :1])
+    z = keras.layers.Concatenate()([h, ctx])
+    z = keras.layers.Dense(hidden[-1], activation='relu')(z)
+    q = keras.layers.Dense(1)(z)
+    return keras.Model(x, keras.ops.squeeze(q, axis=-1))
+
+
 class DQNAgent:
     @classmethod
     def from_config(cls, n_states, n_actions, cfg):
@@ -52,12 +91,14 @@ class DQNAgent:
                    tau=cfg.tau, hard_every=cfg.hard_every, gamma=cfg.gamma, lr=cfg.lr,
                    batch_size=cfg.batch_size, buffer_size=cfg.buffer_size,
                    learn_start=cfg.learn_start, hidden=tuple(cfg.hidden),
-                   dueling=cfg.dueling, n_step=cfg.n_step)
+                   dueling=cfg.dueling, n_step=cfg.n_step, ref_action=cfg.ref_action,
+                   phase_net=cfg.phase_net)
 
     def __init__(self, n_states, n_actions, double=True, target_update='soft',
                  tau=0.005, hard_every=1000, gamma=0.95, lr=2.5e-4,
                  batch_size=100, buffer_size=50000, learn_start=500, hidden=(400, 400),
-                 dueling=False, n_step=1):
+                 dueling=False, n_step=1, ref_action=-1, phase_net=False):
+        """n_states: input size, or (n_stages, n_feats) for the phase-wise network."""
         self.n_states = n_states
         self.n_actions = n_actions
         self.double = double
@@ -72,8 +113,12 @@ class DQNAgent:
         self.n_step = n_step
         self.recent = {}                  # key -> last transitions not yet n steps old
 
-        self.q = build_qnet(n_states, n_actions, hidden, dueling)
-        self.q_target = build_qnet(n_states, n_actions, hidden, dueling)
+        if phase_net:
+            build = lambda: build_phase_qnet(*n_states, hidden=hidden)  # noqa: E731
+        else:
+            build = lambda: build_qnet(n_states, n_actions, hidden, dueling, ref_action)  # noqa: E731
+        self.q = build()
+        self.q_target = build()
         self.q_target.set_weights(self.q.get_weights())
         self.opt = keras.optimizers.Adam(learning_rate=lr, clipnorm=1.0)
         self.huber = keras.losses.Huber()
@@ -81,7 +126,7 @@ class DQNAgent:
     # ------------------------------------------------------------------
 
     def q_values(self, state):
-        return self._predict(tf.convert_to_tensor(state[None, :]))[0].numpy()
+        return self._predict(tf.convert_to_tensor(state[None, ...]))[0].numpy()
 
     def act(self, state, mask, epsilon=0.0):
         valid = np.flatnonzero(mask)

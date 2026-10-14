@@ -75,6 +75,10 @@ class SignalConfig:
                                       # waiting for (else every stage is served in time)
     amp_weight: float = 1.0           # advanced_mp: keep the green while weight x moving
     amp_range: float = 100.0          # vehicles within amp_range m >= the highest pressure
+    rl_experts: dict[str, str] = field(default_factory=dict)   # experts 'rl' / 'rlf':
+                                      # trained stage-control runs ('{seed}' = the hierarchy
+                                      # run's training seed); an RL expert without one is
+                                      # listed (same input size) but unavailable
 
 
 @dataclass
@@ -131,6 +135,8 @@ class ObservationConfig:
     approach_length: float = 0.0      # m, detector mode: a second area detector this long;
                                       # adds the vehicles moving toward the stop line per
                                       # lane (0 = off; ~ speed limit x decision interval)
+    layout: str = 'flat'              # 'flat' (lanes in order) | 'phase' (one feature row per
+                                      # green stage, for agent.phase_net; see observation.py)
 
 
 @dataclass
@@ -159,6 +165,12 @@ class AgentConfig:
                                       # discounted by gamma ** seconds (gamma per second)
     dueling: bool = False             # dueling head: V(s) + A(s, a) - mean A
     n_step: int = 1                   # n-step returns (decisions per stored transition)
+    ref_action: int = -1              # >= 0: Q(s, a) = V(s) + A(s, a) - A(s, ref_action), A
+                                      # starting at zero: the untrained greedy policy takes
+                                      # ref_action (workers: AGREE, i.e. start as the expert)
+                                      # and only learned advantages move it away (residual RL)
+    phase_net: bool = False           # FRAP / MPLight-style phase-wise Q-network, shared by
+                                      # all junctions (needs observation.layout = 'phase')
 
 
 @dataclass
@@ -167,10 +179,14 @@ class TrainConfig:
     episodes: int = 150
     level_min: float = 600.0          # veh/h, demand level sampled uniformly per episode
     level_max: float = 3000.0
+    eps_start: float = 1.0            # epsilon of the first episode (a worker that starts as
+                                      # its expert needs little exploration)
     eps_min: float = 0.05
     eps_fraction: float = 0.6         # fraction of episodes over which epsilon decays
     val_every: int = 10               # episodes between validations (model selection)
     val_levels: list[float] = field(default_factory=lambda: [1200.0, 2400.0])
+    val_per_level: int = 1            # validation scenarios per level (more: less noisy
+                                      # model selection)
     # plan control: green-wave plans calibrated at these levels (per direction); an episode
     # runs the plan matching its demand with probability plan_match, else a random one
     plan_levels: list[float] = field(

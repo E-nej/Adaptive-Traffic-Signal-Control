@@ -71,11 +71,20 @@ def make_agents(network, observer, agent_cfg, actions=None):
     if actions is not None and not getattr(actions, 'has_workers', True):
         return {}
     n_actions = actions.n_actions if actions is not None else network.max_greens
-    dim = observer.dim + (actions.extra_dim if actions is not None else 0)
+    if isinstance(observer.dim, tuple):         # phase layout: no extra features
+        dim = observer.dim
+    else:
+        dim = observer.dim + (actions.extra_dim if actions is not None else 0)
     if hasattr(actions, 'make_agents'):         # e.g. hierarchy with per-expert workers
         made = actions.make_agents(dim + (len(network.tl_ids) if agent_cfg.shared else 0))
         if made is not None:
             return made
+    if agent_cfg.phase_net:     # one phase-wise network for every junction (no junction id)
+        if not isinstance(observer.dim, tuple) or (actions is not None and actions.extra_dim):
+            raise ValueError("agent.phase_net needs observation.layout = 'phase' and "
+                             "signals.control = 'stages'")
+        agent = DQNAgent.from_config(observer.dim, n_actions, agent_cfg)
+        return {tl_id: agent for tl_id in network.tl_ids}
     if agent_cfg.shared:
         agent = DQNAgent.from_config(dim + len(network.tl_ids), n_actions, agent_cfg)
         return {tl_id: agent for tl_id in network.tl_ids}
