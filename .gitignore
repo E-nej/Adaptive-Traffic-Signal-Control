@@ -26,3 +26,6 @@ paper/**/*.pdf
 
 # third-party benchmark scenarios (networks/benchmarks/fetch.py downloads them)
 networks/benchmarks/*/
+
+# slimmed outputs of the old worktrees (models, logs, results)
+outputs_archive/
