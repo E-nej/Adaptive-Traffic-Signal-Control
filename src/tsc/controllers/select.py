@@ -7,6 +7,8 @@ Experts (all Python-controlled, all on the same detectors):
     coord_actuated : coordinated-actuated control on the plan (PlanActuated)
     maxpressure    : max-pressure on the E2 detectors (acyclic, no coordination)
     actuated       : isolated gap-based actuated control, as SUMO's 'actuated' (GapActuated)
+    rl, rlf        : trained stage-control RL policies ([signals] rl_experts, RLExpert;
+                     e.g. a per-junction DQN and a phase-wise network)
 
 An ExpertPool holds a subset of them ([signals] experts, in this order of indices) and
 which one runs each junction.  Inactive experts keep their state up to date, and a plan
@@ -22,7 +24,8 @@ from tsc.controllers.maxpressure import DetectorMaxPressure
 from tsc.controllers.plan import PlanActuated, PlanController
 from tsc.detectors import e1_id, e1u_id
 
-EXPERTS = ('greenwave', 'coord_actuated', 'maxpressure', 'actuated')
+RL_EXPERTS = ('rl', 'rlf')
+EXPERTS = ('greenwave', 'coord_actuated', 'maxpressure', 'actuated') + RL_EXPERTS
 DEFAULT_EXPERTS = ('greenwave', 'coord_actuated', 'maxpressure')
 
 
@@ -78,6 +81,43 @@ class GapActuated(Controller):
         return (head.stage + 1) % len(self.network.greens[tl_id])
 
 
+class RLExpert(Controller):
+    """A trained stage-control RL run as an expert: its own observer, detectors (the run's
+    approach detector must be in the simulation) and greedy policy.  Like max-pressure it is
+    asked every `interval` s of green (the pool's periodic experts)."""
+
+    def __init__(self, network, run_dir):
+        from tsc.experiments.runs import load_policy
+        if not run_dir:
+            raise ValueError("expert 'rl' needs [signals] rl_expert (a trained run directory)")
+        self.policy, run_cfg = load_policy(run_dir, network, 'best')
+        if run_cfg.signals.control != 'stages':
+            raise ValueError(f"{run_dir}: expert 'rl' needs a stage-control run, "
+                             f"not {run_cfg.signals.control!r}")
+        self.approach_length = run_cfg.observation.approach_length
+
+    def reset(self, sim):
+        self.policy.reset(sim)
+
+    def tick(self, sim):
+        self.policy.tick(sim)
+
+    def act(self, sim, tl_id):
+        return self.policy.act(sim, tl_id)
+
+
+class Unavailable(Controller):
+    """Placeholder for an expert listed without its trained run (e.g. 'rl' in a worker run
+    that must have the same expert list, hence input size, as the table it will serve).
+    It must never be activated."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def act(self, sim, tl_id):
+        raise RuntimeError(f'expert {self.name!r} is not available in this run')
+
+
 class ExpertPool:
     """The experts and which one runs each junction (index into `experts`)."""
 
@@ -85,7 +125,7 @@ class ExpertPool:
 
     def __init__(self, network, interval=5, max_extension=20, noise=0.0, dropout=0.0,
                  e2_length=50.0, seed=0, experts=DEFAULT_EXPERTS, actuated_loops='stopline',
-                 hold_guard=False):
+                 hold_guard=False, rl_runs=None):
         unknown = set(experts) - set(EXPERTS)
         if unknown:
             raise ValueError(f'Unknown experts {sorted(unknown)}; choose from {EXPERTS}')
@@ -101,9 +141,14 @@ class ExpertPool:
                                                        e2_length=e2_length, seed=seed),
             'actuated': lambda: GapActuated(network, loops=actuated_loops),
         }
+        rl_runs = rl_runs or {}
+        for name in RL_EXPERTS:
+            make[name] = (lambda run=rl_runs.get(name), name=name:
+                          RLExpert(network, run.format(seed=seed)) if run else Unavailable(name))
         self.experts = [make[name]() for name in self.names]
+        self.available = [i for i, e in enumerate(self.experts) if not isinstance(e, Unavailable)]
         self.plan_experts = [i for i, e in enumerate(self.experts) if isinstance(e, PlanController)]
-        self.periodic = [i for i, n in enumerate(self.names) if n == 'maxpressure']
+        self.periodic = [i for i, n in enumerate(self.names) if n in ('maxpressure', *RL_EXPERTS)]
 
     def set_plans(self, plans):
         for i in self.plan_experts:
@@ -141,7 +186,7 @@ class ExpertPool:
         action = self.active[tl_id]
         if action not in self.periodic:
             return self.experts[action].act(sim, tl_id)
-        # max-pressure re-decides every `interval` s of green, as its baseline does
+        # max-pressure (and RL) re-decide every `interval` s of green, as their baselines do
         head = sim.heads[tl_id]
         if tl_id not in self.mp_stage or (head.timer - head.min_green) % self.interval == 0:
             self.mp_stage[tl_id] = self.experts[action].act(sim, tl_id)
@@ -176,4 +221,5 @@ class FixedSelection(PlanController):
         return self.actions.stage(sim, tl_id, self.assignment.get(tl_id, self.default))
 
 
-__all__ = ['DEFAULT_EXPERTS', 'EXPERTS', 'ExpertPool', 'FixedSelection', 'GapActuated']
+__all__ = ['DEFAULT_EXPERTS', 'EXPERTS', 'ExpertPool', 'FixedSelection', 'GapActuated',
+           'RLExpert']

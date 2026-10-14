@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Step 2I (v6), results in `docs/V6_REPORT.md`:
+  - RL controllers as hierarchy experts: `rl` / `rlf` in `[signals] experts`, run directories
+    in `[signals] rl_experts` (`controllers.select.RLExpert`); an RL expert listed without a
+    run is a placeholder (same worker input size), skipped by the table.
+  - Phase-wise Q-network shared by all junctions (FRAP / MPLight style): `agent.phase_net`
+    with `observation.layout = "phase"` (one feature row per green stage: served lanes,
+    downstream queue, signal state).
+  - Residual worker head `agent.ref_action`: Q(s, ref) = V(s), Q(s, a) = V(s) + A(s, a) with A
+    starting at zero, so an untrained worker acts as its expert.
+  - `train.eps_start` (first-episode ε) and `train.val_per_level` (validation scenarios per
+    level).
+  - `configs/v6/`: config generator (`make_configs.py`), job generator (`make_jobs.py`), job
+    queue with dependencies, priorities and adjustable slots (`run_queue.py`), candidate
+    workers for the table (`admit_candidates.py`), benchmark summary vs published numbers
+    (`summarize.py`).
+  - `docs/BENCHMARK_HANDOFF.md` (papers and improvement list behind 2I and the benchmarks);
+    RESCO Table 1 in `docs/PLAN_REALISM.md`.
 - Hierarchy (2H), manager side: `delay` reward (time lost on the approaches, the evaluated
   quantity); `[hierarchy] default_expert` (`"auto"`: best single expert on validation) with a
   Q-margin and a fallback checkpoint; `tsc accept` (best checkpoint vs its default on fresh

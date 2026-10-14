@@ -59,7 +59,8 @@ def validate(network, cfg, controller, work_dir, library=None):
     Plan control: every scenario runs once with its matching plan and once with the
     opposite direction's plan of the same level (a plan that does not fit the demand).
     """
-    return float(np.mean(scenario_delays(network, cfg, controller, work_dir, library)))
+    return float(np.mean(scenario_delays(network, cfg, controller, work_dir, library,
+                                         per_level=cfg.train.val_per_level)))
 
 
 def scenario_delays(network, cfg, controller, work_dir, library=None, per_level=1,
@@ -240,7 +241,7 @@ def build_table(cfg, greedy, out_dir, label):
     actions = greedy.actions
     work_dir = os.path.join(out_dir, 'work')
     with_worker = h.worker == 'expert'
-    options = [(e, with_worker) for e in range(len(actions.names))]
+    options = [(e, with_worker) for e in actions.selector.available]
     if with_worker and h.table_alone:
         options += [(e, False) for e in sorted(actions.expert_workers)]
     tasks = [(cfg, float(lv), k, e, w, work_dir) for lv in levels
@@ -341,7 +342,7 @@ def train_one(cfg, out_dir):
 
     for ep in range(tc.episodes):
         t0 = time.time()
-        epsilon = max(tc.eps_min, 1.0 - (1.0 - tc.eps_min) * ep / eps_end_ep)
+        epsilon = max(tc.eps_min, tc.eps_start - (tc.eps_start - tc.eps_min) * ep / eps_end_ep)
         if set_training:
             set_training(True, epsilon)
         level = float(rng.uniform(tc.level_min, tc.level_max))
