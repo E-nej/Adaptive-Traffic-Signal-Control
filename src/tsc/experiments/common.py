@@ -154,10 +154,12 @@ def _sumo_version():
 def run_parallel(fn, tasks, workers, fresh=False):
     """Yield fn(task) results as they finish; in-process when workers <= 1 (easier debugging).
 
-    fresh=True runs every task in a new process (needed when tasks use different TensorFlow
-    devices, which a process cannot switch once TensorFlow is initialised).
+    fresh=True runs every task in a new process (needed when tasks use different devices,
+    which a process cannot switch once PyTorch has set one up).  Workers are spawned, not
+    forked, once this process has imported PyTorch: forking after its thread pools started
+    can deadlock.
     """
-    os.environ.setdefault('TSC_TF_THREADS', '1')   # inherited by the worker processes
+    os.environ.setdefault('TSC_THREADS', '1')      # inherited by the worker processes
     if not fresh and (workers <= 1 or len(tasks) <= 1):
         for t in tasks:
             yield fn(t)
@@ -165,6 +167,8 @@ def run_parallel(fn, tasks, workers, fresh=False):
     kwargs = {}
     if fresh:
         kwargs = dict(mp_context=multiprocessing.get_context('spawn'), max_tasks_per_child=1)
+    elif 'torch' in sys.modules:
+        kwargs = dict(mp_context=multiprocessing.get_context('spawn'))
     with ProcessPoolExecutor(max_workers=max(1, min(workers, len(tasks))), **kwargs) as pool:
         futures = [pool.submit(_call, fn, t) for t in tasks]
         for fut in as_completed(futures):

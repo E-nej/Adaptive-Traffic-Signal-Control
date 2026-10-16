@@ -196,7 +196,7 @@ def test_both_levels_learn(corridor, work_root):
     out = os.path.join(work_root, 'out', 'hier_smoke')
     train_one(cfg, out)
     files = os.listdir(out)
-    assert 'final_manager.weights.h5' in files and 'best_S0.weights.h5' in files
+    assert 'final_manager.pt' in files and 'best_S0.pt' in files
     with open(os.path.join(out, 'train_log.csv')) as f:
         header = f.readline()
     assert 'mgr_actuated' in header and 'wrk_hold' in header

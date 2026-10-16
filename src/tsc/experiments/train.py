@@ -5,7 +5,7 @@
 Every episode samples a demand level uniformly from [level_min, level_max] and
 generates a fresh scenario (seed 100000·seed + episode).  Every `val_every`
 episodes the greedy policy is validated on fixed scenarios (700001+) and the
-best one is kept (`best_<tl>.weights.h5`); the last one is saved as `final_*`.
+best one is kept (`best_<tl>.pt`); the last one is saved as `final_*`.
 
 Output per training seed: <out>/s<seed>/ with config.toml, run_info.json,
 train_log.csv and the weights.
@@ -327,17 +327,16 @@ def train_one(cfg, out_dir, on_episode_end=None):
     work_dir = os.path.join(out_dir, 'work')
     os.makedirs(work_dir, exist_ok=True)
 
-    # Import TensorFlow/Keras *before* seeding, as the pre-package train.py did: importing
-    # them after seeding shifts the RNG streams (weights, replay sampling), so the same
-    # seed would no longer reproduce the same run.  The device is set up around the import
-    # (hiding GPUs must happen before it); this consumes no RNG.
+    # Import PyTorch and the agent *before* seeding, so nothing an import does can shift the
+    # RNG streams (weights, replay sampling) of a seeded run.  The device is set up around
+    # the import (hiding GPUs must happen before it); this consumes no RNG.
     devices.prepare(tc.device)
-    import tensorflow as tf
+    import torch
     import tsc.agents.dqn  # noqa: F401
     device = devices.configure(tc.device, tc.gpu_index)
     np.random.seed(seed)
     random.seed(seed)
-    tf.random.set_seed(seed)
+    torch.manual_seed(seed)                 # also seeds every CUDA / ROCm device
 
     update_run_info(out_dir, device=device)
     network = network_for(cfg)

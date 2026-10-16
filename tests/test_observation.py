@@ -161,7 +161,6 @@ def test_approach_detector_feature(test5):
 
 def test_smdp_discount_is_used():
     """A transition's own discount replaces gamma in the target (SMDP: gamma ** seconds)."""
-    import tensorflow as tf  # noqa: F401
     from tsc.agents.dqn import DQNAgent
     agent = DQNAgent(2, 2, gamma=0.9, lr=0.01, batch_size=1, learn_start=1, hidden=(8,))
     s = np.array([1.0, 0.0], dtype=np.float32)
@@ -178,7 +177,6 @@ def test_smdp_discount_is_used():
 def test_n_step_returns():
     """n_step = 3 stores the discounted sum of 3 rewards, bootstrapped 3 decisions later, per
     junction (key); the episode's last, shorter sequences are stored at its end."""
-    import tensorflow as tf  # noqa: F401
     from tsc.agents.dqn import DQNAgent
     agent = DQNAgent(1, 2, gamma=0.5, n_step=3, hidden=(4,))
     mask = np.array([True, True])
@@ -196,7 +194,6 @@ def test_n_step_returns():
 
 
 def test_dueling_head_learns():
-    import tensorflow as tf  # noqa: F401
     from tsc.agents.dqn import DQNAgent
     agent = DQNAgent(2, 3, lr=0.01, batch_size=1, learn_start=1, hidden=(8,), dueling=True)
     s = np.array([1.0, 0.0], dtype=np.float32)

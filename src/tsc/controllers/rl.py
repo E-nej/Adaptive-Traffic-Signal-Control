@@ -67,7 +67,7 @@ def make_actions(network, observer, cfg):
 
 
 def make_agents(network, observer, agent_cfg, actions=None):
-    from tsc.agents.dqn import DQNAgent   # TensorFlow is only imported when RL is used
+    from tsc.agents.dqn import DQNAgent   # PyTorch is only imported when RL is used
     if actions is not None and not getattr(actions, 'has_workers', True):
         return {}
     n_actions = actions.n_actions if actions is not None else network.max_greens
@@ -158,11 +158,18 @@ class RLController(Controller):
 
     def load(self, run_dir, which='best'):
         for name, agent in self.learners().items():
-            agent.load(weights_path(run_dir, which, name))
+            path = weights_path(run_dir, which, name)
+            if not os.path.exists(path) and os.path.exists(TF_WEIGHTS.format(path[:-3])):
+                raise ValueError(f'{run_dir} was trained with TensorFlow (tsc <= 0.2, '
+                                 f'*.weights.h5); this version uses PyTorch: retrain it')
+            agent.load(path)
         if hasattr(self.actions, 'load_meta'):
             self.actions.load_meta(run_dir, which)
         return self
 
 
+TF_WEIGHTS = '{}.weights.h5'       # weights of runs trained with TensorFlow (tsc <= 0.2)
+
+
 def weights_path(run_dir, which, tl_id):
-    return os.path.join(run_dir, f'{which}_{tl_id}.weights.h5')
+    return os.path.join(run_dir, f'{which}_{tl_id}.pt')

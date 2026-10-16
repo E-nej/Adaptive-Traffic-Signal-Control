@@ -13,7 +13,7 @@ import random
 
 import numpy as np
 import pytest
-import tensorflow as tf
+import torch
 from reference_dqn import DQNAgent as ReferenceAgent
 
 from tsc.agents.dqn import DQNAgent
@@ -42,7 +42,7 @@ def build(cls, **kw):
     """Build an agent from a fixed global seed, as train_one seeds before make_agents."""
     random.seed(0)
     np.random.seed(0)
-    tf.random.set_seed(0)
+    torch.manual_seed(0)
     return cls(n_states(kw), N_ACTIONS, batch_size=32, learn_start=32, buffer_size=500, **kw)
 
 
@@ -80,15 +80,10 @@ def assert_same_arrays(xs, ys, what):
         assert np.array_equal(x, y), f'{what}[{i}] differs'
 
 
-def opt_state(agent):
-    return [v.numpy() for v in agent.opt.variables]
-
-
 def assert_same_agent(ref, new, step):
-    assert_same_arrays(ref.q.get_weights(), new.q.get_weights(), f'online weights after step {step}')
-    assert_same_arrays(ref.q_target.get_weights(), new.q_target.get_weights(),
-                       f'target weights after step {step}')
-    assert_same_arrays(opt_state(ref), opt_state(new), f'optimizer state after step {step}')
+    a, b = ref.state_arrays(), new.state_arrays()
+    for part in ('online', 'target', 'optimizer'):
+        assert_same_arrays(a[part], b[part], f'{part} after step {step}')
 
 
 @pytest.mark.parametrize('mode', MODES)

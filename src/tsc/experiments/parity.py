@@ -48,7 +48,7 @@ def short_config(cfg, episodes=6, val_every=2, seed=0):
 def record(cfg, out_dir):
     """Train the (already shortened) cfg in-process into out_dir; write and return its manifest."""
     from tsc.experiments.train import train_one
-    os.environ.setdefault('TSC_TF_THREADS', '1')   # as run_parallel does for `tsc train`
+    os.environ.setdefault('TSC_THREADS', '1')      # as run_parallel does for `tsc train`
     network_for(cfg)                                # as train() does before starting the run
     episodes = []
 
@@ -86,11 +86,7 @@ def fingerprint(ep, info):
                for name, g in info['rngs'].items()},
         },
         'agents': {
-            tl_id: {
-                'online': _sha_arrays(agent.q.get_weights()),
-                'target': _sha_arrays(agent.q_target.get_weights()),
-                'optimizer': _sha_arrays([v.numpy() for v in agent.opt.variables]),
-            }
+            tl_id: {part: _sha_arrays(arrays) for part, arrays in agent.state_arrays().items()}
             for tl_id, agent in info['agents'].items()
         },
     }

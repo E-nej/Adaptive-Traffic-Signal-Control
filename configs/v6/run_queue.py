@@ -46,7 +46,7 @@ def main():
     os.makedirs(os.path.join(root, 'logs'), exist_ok=True)
     status_path = os.path.join(root, 'queue.log')
     slots_file = os.path.join(root, 'slots.txt')
-    env = dict(os.environ, TSC_TF_THREADS='1', PYTHONUNBUFFERED='1')
+    env = dict(os.environ, TSC_THREADS='1', PYTHONUNBUFFERED='1')
 
     def log(msg):
         line = f'{datetime.datetime.now():%m-%d %H:%M:%S} {msg}'

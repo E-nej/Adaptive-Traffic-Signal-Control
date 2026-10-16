@@ -1,7 +1,8 @@
 """Trained run directories: their config and their policy.
 
 A run directory holds `config.toml` (the resolved config of that run, with
-exactly one training seed) and `{best,final}_<tl>.weights.h5`.
+exactly one training seed) and `{best,final}_<tl>.pt` (PyTorch state dicts; runs trained
+with TensorFlow, `*.weights.h5`, cannot be loaded any more).
 
 Runs trained with the pre-package scripts (v0.2-era `train.py`) hold a
 `config.json` instead: the argparse values plus one of the named ablation

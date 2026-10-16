@@ -12,6 +12,7 @@ dependencies = [
     "traci==1.28.0",
     "sumolib==1.28.0",
     "tensorflow>=2.21,<2.22",
+    "torch>=2.14,<2.15",
     "numpy>=2.0",
     "pandas>=2.2",
     "scipy>=1.13",
@@ -24,6 +25,15 @@ dependencies = [
 # NVIDIA GPUs (opt-in, see docs/GPU.md): CUDA / cuDNN runtime libraries for TensorFlow's
 # CUDA build.  AMD GPUs use the tensorflow-rocm wheel instead (manual install, docs/GPU.md).
 cuda = ["tensorflow[and-cuda]>=2.21,<2.22"]
+
+[tool.uv.sources]
+# The CPU build by default (small, and the bit-exact reference); GPU builds are extras.
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [project.scripts]
 tsc = "tsc.cli:main"

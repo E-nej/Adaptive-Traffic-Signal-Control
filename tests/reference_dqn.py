@@ -1,22 +1,34 @@
-"""FROZEN reference copy of tsc.agents.dqn.DQNAgent as of main a1057e9 (v0.2.0 plus the
-2F-2I options: done/discount column, n-step, dueling, ref_action, phase_net), i.e. the agent
-before the training speedups of perf/training-pipeline.
+"""FROZEN reference copy of tsc.agents.dqn.DQNAgent as of the PyTorch port (tsc 0.3.0).
 
 Test oracle for tests/test_dqn_parity.py: every optimisation of the real agent must
 reproduce this implementation bit for bit (weights, target weights, optimizer state,
 losses and RNG consumption).  Do not edit; only the thread configuration was dropped
-(it is process-wide and already done by tsc.agents.dqn).
+(it is process-wide and already done by tsc.agents.dqn).  The previous oracle was the
+TensorFlow agent; tests/test_tf_equivalence.py checks this one against recorded runs of it.
 """
 
 import random
 from collections import deque
 
 import numpy as np
-import tensorflow as tf
-from tensorflow import keras
+import torch
+import torch.nn.functional as F
+from torch import nn
 
 
-def build_qnet(n_in, n_out, hidden=(400, 400), dueling=False, ref_action=-1):
+def dense(n_in, n_out, zero=False):
+    """Linear layer initialised as Keras' Dense: Glorot-uniform kernel (or zeros), zero bias."""
+    layer = torch.nn.utils.skip_init(nn.Linear, n_in, n_out)
+    with torch.no_grad():
+        if zero:
+            layer.weight.zero_()
+        else:
+            nn.init.xavier_uniform_(layer.weight)
+        layer.bias.zero_()
+    return layer
+
+
+class QNet(nn.Module):
     """The paper's network: first hidden layer linear, the others ReLU, linear output.
 
     dueling: the output is V(s) + A(s, a) - mean_a A(s, a) (Wang et al. 2016).
@@ -28,32 +40,34 @@ def build_qnet(n_in, n_out, hidden=(400, 400), dueling=False, ref_action=-1):
     transitions, so untried actions do not look better (or worse) than the reference just
     because V has moved.
     """
-    if ref_action >= 0:
-        x = inp = keras.Input(shape=(n_in,))
-        for i, units in enumerate(hidden):
-            x = keras.layers.Dense(units, activation=None if i == 0 else 'relu')(x)
-        v = keras.layers.Dense(1)(x)
-        adv = keras.layers.Dense(n_out, kernel_initializer='zeros', bias_initializer='zeros')(x)
-        keep = np.ones((1, n_out), dtype='float32')
-        keep[0, ref_action] = 0.0                # the reference action has no advantage
-        out = v + adv * keep
-        return keras.Model(inp, out)
-    if dueling:
-        x = inp = keras.Input(shape=(n_in,))
-        for i, units in enumerate(hidden):
-            x = keras.layers.Dense(units, activation=None if i == 0 else 'relu')(x)
-        v = keras.layers.Dense(1)(x)
-        adv = keras.layers.Dense(n_out)(x)
-        out = v + adv - keras.ops.mean(adv, axis=1, keepdims=True)
-        return keras.Model(inp, out)
-    layers = [keras.Input(shape=(n_in,))]
-    for i, units in enumerate(hidden):
-        layers.append(keras.layers.Dense(units, activation=None if i == 0 else 'relu'))
-    layers.append(keras.layers.Dense(n_out, activation='linear'))
-    return keras.Sequential(layers)
+
+    def __init__(self, n_in, n_out, hidden=(400, 400), dueling=False, ref_action=-1):
+        super().__init__()
+        sizes = [n_in, *hidden]
+        self.hidden = nn.ModuleList(dense(a, b) for a, b in zip(sizes, sizes[1:]))
+        self.head = 'residual' if ref_action >= 0 else 'dueling' if dueling else 'plain'
+        if self.head == 'plain':
+            self.out = dense(sizes[-1], n_out)
+        else:
+            self.v = dense(sizes[-1], 1)
+            self.adv = dense(sizes[-1], n_out, zero=self.head == 'residual')
+        if self.head == 'residual':
+            keep = torch.ones(1, n_out)
+            keep[0, ref_action] = 0.0            # the reference action has no advantage
+            self.register_buffer('keep', keep)
+
+    def forward(self, x):
+        for i, layer in enumerate(self.hidden):
+            x = layer(x) if i == 0 else F.relu(layer(x))
+        if self.head == 'plain':
+            return self.out(x)
+        v, adv = self.v(x), self.adv(x)
+        if self.head == 'dueling':
+            return v + adv - adv.mean(dim=1, keepdim=True)
+        return v + adv * self.keep
 
 
-def build_phase_qnet(n_stages, n_feats, hidden=(64, 64)):
+class PhaseQNet(nn.Module):
     """Phase-wise Q-network (FRAP, Zheng et al. 2019; MPLight, Chen et al. 2020).
 
     Input (n_stages, n_feats): one row per green stage (observation layout 'phase').  Every
@@ -62,15 +76,87 @@ def build_phase_qnet(n_stages, n_feats, hidden=(64, 64)):
     the junction, its orientation or its number of stages, so one network serves every
     junction (padded stages are masked by the agent).
     """
-    x = keras.Input(shape=(n_stages, n_feats))
-    h = x
-    for units in hidden:
-        h = keras.layers.Dense(units, activation='relu')(h)
-    ctx = keras.ops.mean(h, axis=1, keepdims=True) * keras.ops.ones_like(h[:, :, :1])
-    z = keras.layers.Concatenate()([h, ctx])
-    z = keras.layers.Dense(hidden[-1], activation='relu')(z)
-    q = keras.layers.Dense(1)(z)
-    return keras.Model(x, keras.ops.squeeze(q, axis=-1))
+
+    def __init__(self, n_stages, n_feats, hidden=(64, 64)):
+        super().__init__()
+        sizes = [n_feats, *hidden]
+        self.embed = nn.ModuleList(dense(a, b) for a, b in zip(sizes, sizes[1:]))
+        self.mix = dense(2 * sizes[-1], sizes[-1])
+        self.out = dense(sizes[-1], 1)
+
+    def forward(self, x):
+        h = x
+        for layer in self.embed:
+            h = F.relu(layer(h))
+        ctx = h.mean(dim=1, keepdim=True).expand_as(h)
+        z = F.relu(self.mix(torch.cat([h, ctx], dim=-1)))
+        return self.out(z).squeeze(-1)
+
+
+def build_qnet(n_in, n_out, hidden=(400, 400), dueling=False, ref_action=-1):
+    return QNet(n_in, n_out, hidden, dueling, ref_action)
+
+
+def build_phase_qnet(n_stages, n_feats, hidden=(64, 64)):
+    return PhaseQNet(n_stages, n_feats, hidden)
+
+
+class KerasAdam:
+    """Adam as Keras 3 implements it, with Keras' `clipnorm`.
+
+    Every weight's gradient is clipped to norm `clipnorm` on its own (g * c / max(|g|, c));
+    then m += (g - m)(1 - b1), v += (g^2 - v)(1 - b2) and
+    w -= m * lr sqrt(1 - b2^t) / (1 - b1^t) / (sqrt(v) + eps).  torch.optim.Adam adds eps
+    to the bias-corrected sqrt(v) instead, and clip_grad_norm_ clips the global norm.
+    """
+
+    def __init__(self, params, lr, beta_1=0.9, beta_2=0.999, epsilon=1e-7, clipnorm=None):
+        self.params = list(params)
+        self.lr, self.beta_1, self.beta_2 = lr, beta_1, beta_2
+        self.epsilon, self.clipnorm = epsilon, clipnorm
+        self.iterations = 0
+        self.m = [torch.zeros_like(p) for p in self.params]
+        self.v = [torch.zeros_like(p) for p in self.params]
+
+    def zero_grad(self):
+        for p in self.params:
+            p.grad = None
+
+    @torch.no_grad()
+    def step(self):
+        t = torch.tensor(float(self.iterations + 1))
+        b1_power = torch.tensor(self.beta_1) ** t
+        b2_power = torch.tensor(self.beta_2) ** t
+        alpha = (self.lr * torch.sqrt(1 - b2_power) / (1 - b1_power)).to(self.params[0].device)
+        for p, m, v in zip(self.params, self.m, self.v):
+            g = p.grad
+            if self.clipnorm:
+                norm = torch.sqrt(torch.sum(torch.square(g)))
+                g = g * self.clipnorm / torch.clamp(norm, min=self.clipnorm)
+            m.add_((g - m) * (1 - self.beta_1))
+            v.add_((torch.square(g) - v) * (1 - self.beta_2))
+            p.sub_(m * alpha / (torch.sqrt(v) + self.epsilon))
+        self.iterations += 1
+
+    def state_arrays(self):
+        return ([np.array(self.iterations)] + [x.detach().cpu().numpy() for x in self.m]
+                + [x.detach().cpu().numpy() for x in self.v])
+
+
+def keras_weights(model):
+    """Parameters as Keras' get_weights(): per layer the kernel (in, out), then the bias."""
+    return [np.ascontiguousarray(p.detach().cpu().numpy().T if p.ndim == 2 else p.detach().cpu().numpy())
+            for p in model.parameters()]
+
+
+def set_keras_weights(model, weights):
+    with torch.no_grad():
+        params = list(model.parameters())
+        if len(params) != len(weights):
+            raise ValueError(f'{len(weights)} arrays for {len(params)} parameters')
+        for p, w in zip(params, weights):
+            w = np.asarray(w, dtype=np.float32)
+            p.copy_(torch.from_numpy(np.ascontiguousarray(w.T if p.ndim == 2 else w)))
 
 
 class DQNAgent:
@@ -87,8 +173,9 @@ class DQNAgent:
     def __init__(self, n_states, n_actions, double=True, target_update='soft',
                  tau=0.005, hard_every=1000, gamma=0.95, lr=2.5e-4,
                  batch_size=100, buffer_size=50000, learn_start=500, hidden=(400, 400),
-                 dueling=False, n_step=1, ref_action=-1, phase_net=False):
-        """n_states: input size, or (n_stages, n_feats) for the phase-wise network."""
+                 dueling=False, n_step=1, ref_action=-1, phase_net=False, device=None):
+        """n_states: input size, or (n_stages, n_feats) for the phase-wise network.
+        device: torch device of the networks (default 'cpu')."""
         self.n_states = n_states
         self.n_actions = n_actions
         self.double = double
@@ -102,21 +189,24 @@ class DQNAgent:
         self.grad_steps = 0
         self.n_step = n_step
         self.recent = {}                  # key -> last transitions not yet n steps old
+        self.device = torch.device(device or 'cpu')
 
         if phase_net:
             build = lambda: build_phase_qnet(*n_states, hidden=hidden)  # noqa: E731
         else:
             build = lambda: build_qnet(n_states, n_actions, hidden, dueling, ref_action)  # noqa: E731
-        self.q = build()
-        self.q_target = build()
-        self.q_target.set_weights(self.q.get_weights())
-        self.opt = keras.optimizers.Adam(learning_rate=lr, clipnorm=1.0)
-        self.huber = keras.losses.Huber()
+        self.q = build().to(self.device)
+        self.q_target = build().to(self.device)
+        self.q_target.load_state_dict(self.q.state_dict())
+        self.q_target.requires_grad_(False)
+        self.opt = KerasAdam(self.q.parameters(), lr=lr, clipnorm=1.0)
 
     # ------------------------------------------------------------------
 
     def q_values(self, state):
-        return self._predict(tf.convert_to_tensor(state[None, ...]))[0].numpy()
+        x = torch.from_numpy(np.asarray(state, dtype=np.float32)[None, ...]).to(self.device)
+        with torch.inference_mode():
+            return self.q(x)[0].cpu().numpy().copy()
 
     def act(self, state, mask, epsilon=0.0):
         valid = np.flatnonzero(mask)
@@ -165,59 +255,63 @@ class DQNAgent:
             return None
         batch = random.sample(self.buffer, self.batch_size)
         s, a, r, s2, m2, d = (np.array(x) for x in zip(*batch))
-        loss = self._train_step(
-            tf.convert_to_tensor(s, tf.float32), tf.convert_to_tensor(a, tf.int32),
-            tf.convert_to_tensor(r, tf.float32), tf.convert_to_tensor(s2, tf.float32),
-            tf.convert_to_tensor(m2, tf.bool), tf.convert_to_tensor(d, tf.float32),
-        )
+        loss = self._train_step(self._tensor(s, np.float32), self._tensor(a, np.int64),
+                                self._tensor(r, np.float32), self._tensor(s2, np.float32),
+                                self._tensor(m2, bool), self._tensor(d, np.float32))
         self.grad_steps += 1
         if self.target_update == 'soft':
-            self._soft_update()
+            self._polyak()
         elif self.grad_steps % self.hard_every == 0:
-            self.q_target.set_weights(self.q.get_weights())
+            self.q_target.load_state_dict(self.q.state_dict())
         return float(loss)
 
     # ------------------------------------------------------------------
 
-    @tf.function
-    def _predict(self, x):
-        return self.q(x, training=False)
+    def _tensor(self, x, dtype):
+        return torch.from_numpy(np.asarray(x, dtype=dtype)).to(self.device)
 
-    @tf.function
     def _train_step(self, s, a, r, s2, m2, d):
-        neg_inf = tf.fill(tf.shape(m2), -1e9)
-        q_next_target = self.q_target(s2, training=False)
-        if self.double:
-            q_next_online = tf.where(m2, self.q(s2, training=False), neg_inf)
-            best = tf.argmax(q_next_online, axis=1, output_type=tf.int32)
-            next_v = tf.gather(q_next_target, best, axis=1, batch_dims=1)
-        else:
-            next_v = tf.reduce_max(tf.where(m2, q_next_target, neg_inf), axis=1)
-        target = tf.stop_gradient(r + d * next_v)
-        with tf.GradientTape() as tape:
-            q_sa = tf.gather(self.q(s, training=True), a, axis=1, batch_dims=1)
-            loss = self.huber(target, q_sa)
-        grads = tape.gradient(loss, self.q.trainable_variables)
-        self.opt.apply_gradients(zip(grads, self.q.trainable_variables))
-        return loss
+        """One Double/plain DQN gradient step."""
+        with torch.no_grad():
+            neg_inf = torch.full(m2.shape, -1e9, device=self.device)
+            q_next_target = self.q_target(s2)
+            if self.double:
+                q_next_online = torch.where(m2, self.q(s2), neg_inf)
+                best = torch.argmax(q_next_online, dim=1)
+                next_v = q_next_target.gather(1, best[:, None]).squeeze(1)
+            else:
+                next_v = torch.where(m2, q_next_target, neg_inf).max(dim=1).values
+            target = r + d * next_v
+        q_sa = self.q(s).gather(1, a[:, None]).squeeze(1)
+        loss = F.huber_loss(q_sa, target, delta=1.0)
+        self.opt.zero_grad()
+        loss.backward()
+        self.opt.step()
+        return loss.detach()
 
-    @tf.function
-    def _soft_update(self):
-        for t, w in zip(self.q_target.trainable_variables, self.q.trainable_variables):
-            t.assign(self.tau * w + (1.0 - self.tau) * t)
+    @torch.no_grad()
+    def _polyak(self):
+        for t, w in zip(self.q_target.parameters(), self.q.parameters()):
+            t.copy_(self.tau * w + (1.0 - self.tau) * t)
 
     # ------------------------------------------------------------------
 
     def get_weights(self):
-        return self.q.get_weights()
+        """Online weights as numpy arrays in Keras' layout (kernel (in, out), bias)."""
+        return keras_weights(self.q)
 
     def set_weights(self, w):
-        self.q.set_weights(w)
-        self.q_target.set_weights(w)
+        set_keras_weights(self.q, w)
+        self.q_target.load_state_dict(self.q.state_dict())
+
+    def state_arrays(self):
+        """Everything training updates, as numpy arrays (parity fingerprints)."""
+        return {'online': keras_weights(self.q), 'target': keras_weights(self.q_target),
+                'optimizer': self.opt.state_arrays()}
 
     def save(self, path):
-        self.q.save_weights(path)
+        torch.save(self.q.state_dict(), path)
 
     def load(self, path):
-        self.q.load_weights(path)
-        self.q_target.set_weights(self.q.get_weights())
+        self.q.load_state_dict(torch.load(path, map_location=self.device, weights_only=True))
+        self.q_target.load_state_dict(self.q.state_dict())
