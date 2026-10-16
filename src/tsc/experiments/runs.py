@@ -69,11 +69,13 @@ def make_observer(network, cfg, seed):
                     approach_length=o.approach_length, layout=o.layout)
 
 
-def load_policy(run_dir, network, which='best', device='cpu'):
+def load_policy(run_dir, network, which='best', device=None):
     """(greedy RLController, run Config) of a trained run, on `network`.
 
-    The policy runs on `device` ('cpu' by default, whatever device it was trained on), so
-    evaluation results do not depend on the GPU it was trained on (docs/GPU.md).
+    The policy runs on `device` whatever device it was trained on; evaluation passes
+    evaluate.device ('cpu'), so its results do not depend on the GPU a run was trained on
+    (docs/GPU.md).  None: the device this process already runs on (a policy loaded inside a
+    training run: RL experts, expert workers, acceptance), else the CPU.
     """
     from tsc import devices
     devices.setup(device)

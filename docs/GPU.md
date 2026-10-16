@@ -21,6 +21,9 @@ Each run records its device in its `config.toml` and `run_info.json`.
   and turns TF32 off on NVIDIA. A GPU only counts as verified once this has been checked (see the checklist below).
 - **Evaluation stays on the CPU** (`evaluate.device = "cpu"`, the default), whatever a policy was trained on.
   This is a reproducibility policy: evaluation results then do not depend on the GPU model.
+  Trained policies loaded *inside* a training run follow that run's device, because one process cannot switch devices.
+  This covers RL experts (`[signals] rl_experts`), expert workers and the acceptance test at the end of hierarchy runs.
+  A standalone `tsc accept` runs on the CPU.
 - **SUMO and the Python loop always run on the CPU.** A GPU only speeds up the Q-network updates (~60–70 % of an episode).
   Each GPU worker still needs roughly half a CPU core.
 

@@ -72,6 +72,20 @@ def test_prepare_cpu_hides_gpus(monkeypatch):
         devices.prepare('tpu')
 
 
+def test_setup_default_keeps_the_process_device(monkeypatch):
+    """A policy loaded inside a GPU training run (RL experts, expert workers, acceptance)
+    keeps the run's device: one process cannot switch from GPU to CPU."""
+    for var in devices.HIDE_VARS:
+        monkeypatch.delenv(var, raising=False)
+    on_gpu = {'device': 'gpu', 'index': 0, 'name': 'x', 'arch': None, 'status': 'unverified',
+              'backend': 'cuda'}
+    monkeypatch.setattr(devices, '_configured', on_gpu)
+    assert devices.setup() is on_gpu
+    assert not any(var in os.environ for var in devices.HIDE_VARS)     # prepare('cpu') not run
+    with pytest.raises(RuntimeError, match='cannot switch'):
+        devices.setup('cpu')
+
+
 def test_device_config_defaults():
     cfg = config.Config()
     assert cfg.train.device == 'cpu' and cfg.train.gpu_index is None

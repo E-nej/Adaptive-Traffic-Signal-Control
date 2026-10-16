@@ -100,8 +100,15 @@ def choose(gpus, gpu_index=None):
     return chosen
 
 
-def setup(device, gpu_index=None):
-    """prepare + import TensorFlow + configure, for code that has no RNG to protect (evaluation)."""
+def setup(device=None, gpu_index=None):
+    """prepare + import TensorFlow + configure, for code that has no RNG to protect (evaluation).
+
+    device None: keep the device this process is already configured for, else 'cpu'.
+    """
+    if device is None:
+        if _configured is not None:
+            return _configured
+        device = 'cpu'
     prepare(device)
     import tensorflow  # noqa: F401
     return configure(device, gpu_index)
