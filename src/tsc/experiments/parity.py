@@ -7,7 +7,7 @@
 A run is cut to `episodes` episodes (validation every `val_every`) and after every
 episode the manifest records the full train_log row, whether validation improved the
 best weights, SHA-256 hashes of every agent's online, target and optimizer variables,
-hashes of all RNG states (Python, NumPy global, trainer, observer) and of the route
+hashes of all RNG states (Python, NumPy global, trainer, plan, observer) and of the route
 file, plus the software stack.  Two manifests are equal when every recorded value is
 equal, except IGNORED_FIELDS of the row.
 

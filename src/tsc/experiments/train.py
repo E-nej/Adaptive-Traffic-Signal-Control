@@ -204,7 +204,8 @@ def accept(run_dir, per_level=None, alpha=0.05):
     else:
         work_dir = os.path.join(run_dir, 'work')
         os.makedirs(work_dir, exist_ok=True)
-        args = (network, cfg, policy, work_dir, library, per_level, seeds_mod.acceptance)
+        routes = {}                         # the same scenarios for both: routes generated once
+        args = (network, cfg, policy, work_dir, library, per_level, seeds_mod.acceptance, routes)
         learned = np.array(scenario_delays(*args))
         if mode == 'manager':
             actions.force(manager.default)
@@ -487,8 +488,9 @@ def train_one(cfg, out_dir, on_episode_end=None):
               f"{'val %.1f ' % row['val_delay'] if 'val_delay' in row else ''}({row['seconds']}s)",
               flush=True)
         if on_episode_end is not None:
-            on_episode_end(ep, {'row': row, 'improved': improved, 'agents': agents, 'route': route,
-                                'rngs': {'trainer': rng, 'observer': observer.rng,
+            on_episode_end(ep, {'row': row, 'improved': improved, 'agents': agents or {},
+                                'route': route,
+                                'rngs': {'trainer': rng, 'plan': plan_rng, 'observer': observer.rng,
                                          'observer_messages': observer.message_rng}})
 
     prefetch.shutdown()
