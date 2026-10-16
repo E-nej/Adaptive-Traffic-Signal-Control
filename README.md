@@ -103,8 +103,9 @@ improvements), [BENCHMARK_HANDOFF.md](docs/BENCHMARK_HANDOFF.md) (papers and imp
 
 ## Install
 
-You need [uv](https://docs.astral.sh/uv/). Python 3.12 is used because TensorFlow
-does not support newer versions yet.
+You need [uv](https://docs.astral.sh/uv/) and Python 3.12. The RL agents use PyTorch;
+`uv sync` installs its CPU build (the bit-exact reference). GPU builds (CUDA, ROCm) are
+opt-in dependency groups, see [docs/GPU.md](docs/GPU.md).
 
 ```bash
 uv sync
@@ -144,8 +145,8 @@ uv run tsc plot outputs/eval/baselines/results.csv outputs/eval/step1/results.cs
 
 Any value can be overridden on the command line, e.g.
 `--set observation.noise=0.1 --set name=full_noise`. `--workers N` sets the
-number of parallel processes. TensorFlow runs single-threaded in each process
-(`TSC_TF_THREADS`, default 1), so parallel runs do not slow each other down.
+number of parallel processes. PyTorch runs single-threaded in each process
+(`TSC_THREADS`, default 1), so parallel runs do not slow each other down.
 
 ### Seeds
 
@@ -184,9 +185,9 @@ uv run tsc plot outputs/eval/baselines/results.csv outputs/eval/step1/results.cs
 The refactor was checked against the pre-package scripts: the baseline sweep
 reproduces every metric of all 240 runs exactly, observations and rewards are
 identical step by step, trained policies evaluate identically, and training with
-the same seed gives an identical training log. Run directories written by those
-scripts (`config.json` + `*.weights.h5`) can be evaluated directly, e.g.
-`tsc evaluate configs/step1/evaluate.toml --runs "path/to/runs/train/*"`.
+the same seed gives an identical training log. That held up to version 0.2, which used
+TensorFlow. Since 0.3 the agents use PyTorch: runs trained before (`*.weights.h5`, also
+those of the pre-package scripts) cannot be loaded any more and must be retrained.
 
 ## Repository layout
 

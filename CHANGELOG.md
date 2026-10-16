@@ -6,6 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Version 0.3.0.
+
+### Breaking
+- **The RL agents use PyTorch instead of TensorFlow/Keras** (`tsc.agents.dqn`, torch 2.14).
+  The networks, initialisation (Glorot-uniform, zero biases), Keras' Adam update with
+  per-weight gradient clipping, Huber loss and DQN targets are the same:
+  `tests/test_tf_equivalence.py` replays recorded TensorFlow runs of every agent mode and
+  matches them to float32 rounding. Results are still not bit-identical to TensorFlow runs
+  (different random initial weights for a seed, different summation order), so **every
+  RL run must be retrained**; earlier numbers stay valid as TensorFlow results.
+- Weights are saved as PyTorch state dicts, `{best,final}_<tl>.pt`. Runs trained with
+  TensorFlow (`*.weights.h5`, including the pre-package scripts' runs) cannot be loaded;
+  `tsc` says so instead of failing obscurely.
+- Dependencies: TensorFlow is gone. `uv sync` installs PyTorch's CPU build; GPU builds are
+  dependency groups (`uv sync --no-group cpu --group cuda | cuda126 | rocm`, docs/GPU.md),
+  which replaces the manual `tensorflow-rocm` install and the `cuda` extra.
+- `TSC_THREADS` sets the threads per process (`TSC_TF_THREADS` is still read as a fallback).
+
 ### Added
 - Step 2I (v6), results in `docs/V6_REPORT.md`:
   - RL controllers as hierarchy experts: `rl` / `rlf` in `[signals] experts`, run directories
@@ -71,12 +89,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent before the speedups (every agent option) after every gradient step; `tsc parity record|check|compare` fingerprints a short
   training run (log rows, weight/optimizer/RNG/route hashes) and reports the first difference.
 - Opt-in GPU training (`train.device = "gpu"`, CUDA or ROCm; `src/tsc/devices.py`, docs/GPU.md):
-  op determinism, memory growth, TF32 off; unsupported GPUs (RTX 50xx with TF 2.21, AMD
-  integrated GPUs) are refused. `tsc devices`, `tsc bench` (episodes/min under CPU/GPU worker
-  mixes) and `tsc train --gpu-workers K` (hybrid scheduling). Optional `cuda` extra.
-  GPU runs are reproducible on the same GPU but not bit-identical to CPU runs.
-- `run_info.json` records the software stack (packages, CPU and SIMD flags, TensorFlow build)
-  and the training device.
+  deterministic algorithms, TF32 off; GPUs whose architecture the installed PyTorch build
+  lacks and AMD integrated GPUs are refused. `tsc devices`, `tsc bench` (episodes/min under
+  CPU/GPU worker mixes, peak GPU memory) and `tsc train --gpu-workers K` (hybrid
+  scheduling). GPU runs are reproducible on the same GPU but not bit-identical to CPU runs.
+- `run_info.json` records the software stack (packages, CPU and SIMD flags, the PyTorch
+  build and its CPU kernel level) and the training device.
 
 ### Removed
 - RL controller selection per junction (2G: `[signals] control = "select"`, `select_interval`,

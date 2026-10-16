@@ -357,3 +357,58 @@ Files:
   - M2: the coworker runs the RX 7900 XT checklist (`docs/GPU.md`).
   - M3: cross-machine CPU diagnostic.
   - M4: RTX 40xx check.
+
+## PyTorch port (branch `torch-port`, from `perf/training-pipeline`; tsc 0.3.0)
+
+Plan: switch the agents from TensorFlow to PyTorch, for GPU support (CUDA and ROCm wheels,
+native Windows CUDA, RTX 50xx), speed, and a team requirement. Old weights are dropped; every
+RL run is retrained with PyTorch. `torch-port` is merged back into `perf/training-pipeline`.
+
+**Done** (one commit each):
+- TensorFlow reference fixtures (`tests/fixtures/make_tf_reference.py`, `tf_reference/*.npz`),
+  recorded on the TensorFlow agent: 8 modes, 60 gradient steps each.
+- The PyTorch agent: the same API and the same numerics as Keras.
+  - Glorot-uniform init with zero biases; Keras' Adam (ε added to √v) with per-weight clipnorm; Huber loss.
+  - `tests/test_tf_equivalence.py` matches every mode at rtol 1e-4 / atol 1e-5.
+    The correct agent stays below 0.43 of that tolerance; PyTorch's own ε placement exceeds it 18–870×, and global clipping 2600–8300×.
+  - Weights are saved as `*.pt`; TensorFlow runs raise a clear error.
+  - `tests/reference_dqn.py` is the frozen PyTorch agent.
+- Device setup for PyTorch:
+  - deterministic algorithms, TF32 off, `CUBLAS_WORKSPACE_CONFIG`;
+  - `torch_device()`;
+  - arch verdicts from `torch.cuda.get_arch_list()`.
+- `run_info` records the PyTorch build (CPU kernel level, CUDA/HIP/cuDNN).
+- Dependencies: TensorFlow is removed. `uv sync` installs the CPU build; the groups `cuda` (cu130), `cuda126` and `rocm` (rocm7.2) install the GPU builds.
+- Speed: the first agent's `replay()` was 1.66× slower than TensorFlow's, because the op-by-op Adam took 2.9 ms.
+  With fused Adam (ε/√(1−β₂ᵗ) per step) and a single `_foreach_lerp_` Polyak update:
+  `replay()` 3.80 ms vs TensorFlow 4.34 ms; greedy `act()` 0.087 vs 0.254 ms
+  (step1/full network, one thread, this laptop).
+- The full test suite passes without TensorFlow installed (258 tests).
+- `tsc devices` on the P2000 with `--group cuda126`: detected, and it runs the `sm_60` kernels.
+- CPU same-seed reproducibility: two PyTorch `tsc parity record` runs are IDENTICAL on step1/full,
+  step1/base, corridor/dir_coop, plan/dir_shared and hierarchy/workers/corridor_greenwave.
+  The first recordings are the new goldens in `outputs/parity/<host>/`.
+  The TensorFlow goldens of `a1057e9` are kept in `outputs/parity/<host>_tf_a1057e9/`.
+- Indicative end-to-end speed: the parity recordings, 6 episodes each, with 5 recordings side by side for both frameworks.
+  - step1/full: 141 s with TensorFlow vs 83 s with PyTorch (1.7×).
+  - corridor/dir_coop: 285 s vs 179 s (1.6×).
+  - The runs start from different initial weights and are short, so the proper comparison is item 2 below.
+
+**Postponed verification** (about 4–5 h of compute; run it before relying on PyTorch results):
+1. Learning quality, TensorFlow vs PyTorch, 3 seeds each, trained side by side.
+   - This needs a TensorFlow environment: `git worktree add ../tsc-tf perf/training-pipeline`, then `cd ../tsc-tf && uv sync`.
+   - In each tree (TensorFlow: `../tsc-tf`; PyTorch: this repo), with `<fw>` = `tf` or `torch`:
+     ```bash
+     .venv/bin/tsc train configs/step1/full.toml --seeds 0-2 --workers 3 --set name=cmp_<fw>_full --out <repo>/outputs/train/cmp_<fw>_full
+     .venv/bin/tsc evaluate configs/step1/evaluate.toml --runs "<repo>/outputs/train/cmp_<fw>_full/s*" --no-baselines --workers 3 --out <repo>/outputs/eval/cmp_<fw>_full
+     ```
+   - The same for `configs/corridor/dir_coop.toml` with `configs/corridor/evaluate.toml`.
+   - Then compare: `tsc compare outputs/eval/cmp_tf_full/results.csv outputs/eval/cmp_torch_full/results.csv --ref cmp_tf_full`.
+     The expectation is no significant difference in delay.
+   - Also compare the training curves (`configs/v6/plot_training.py`) and the episode times in `train_log.csv` (end-to-end speed under equal load).
+2. Speed: `tsc bench configs/step1/full.toml --mix cpu:5` in both trees.
+3. P2000 GPU (`uv sync --no-group cpu --group cuda126`, `UV_NO_SYNC=1`):
+   - the agent microbenchmark (`replay`/`act` on GPU vs CPU);
+   - two same-seed GPU `tsc parity record` runs, then `tsc parity compare` (they must be IDENTICAL);
+   - `tsc bench --mix gpu:2,cpu:4`.
+4. The coworker's RX 7900 XT checklist (`docs/GPU.md`, `--group rocm`).

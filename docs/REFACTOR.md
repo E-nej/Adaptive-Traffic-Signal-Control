@@ -12,7 +12,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` dropped
 - v0.1.0 = `3b729fa` (head of `origin/multiagent`, the paper code). `main` fast-forwarded to it,
   tag created **locally** — not pushed yet.
 - Keep TensorFlow for v0.2.0 (the running step 1/2 runs use it). A numpy forward pass in
-  `act()` (or PyTorch) is a v0.3 item.
+  `act()` (or PyTorch) is a v0.3 item. *Done in 0.3.0: the agents use PyTorch (CHANGELOG).*
 - No "legacy" 4-phase / grid config: v0.1.0 covers the paper setup.
 - Paper sources may go in `paper/` (build outputs gitignored).
 - Configs are TOML (`tomllib` to read, `tomli-w` to write the resolved config).
