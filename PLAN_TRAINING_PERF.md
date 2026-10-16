@@ -155,7 +155,8 @@ What the GPU can buy, end-to-end:
 - The 7900 XT is the priority, but it can only be validated on the coworker's machine, which adds round-trip latency.
 - So the GPU path ships right after the parity harness (which its repeatability test needs).
 - While the coworker tests, the Tier 1 CPU items are implemented here. They speed up GPU runs too (act, routes, SUMO, Python loop).
-**Branch.** All M1 work goes on a new branch `perf/training-pipeline`, created from `main` (currently `9d69577`).
+**Branch.** All M1 work goes on a new branch `perf/training-pipeline`, created from `main` at `9d69577`.
+It was later rebased onto `main` `a1057e9` (2F–2I); see "Rebase onto 2F–2I" under Progress.
 Nothing is committed to `main`.
 - One commit per step below, so each optimization can be tested, bisected or reverted on its own.
 - The untracked `Deep-Qlearning-TSC/` directory stays untouched and out of commits.
@@ -163,6 +164,7 @@ Nothing is committed to `main`.
 
 **Step 0: the parity harness, committed before any optimization.**
 - `tests/reference_dqn.py`: a verbatim frozen copy of today's `DQNAgent`, used only as a test oracle.
+  After the rebase it is the copy of `main` `a1057e9`'s agent, with every 2F–2I option.
 - `tests/test_dqn_parity.py` (unit, no SUMO):
   - The reference and new agents are built under identical seeding; their initial weights must be identical.
   - Both get the same transitions and then run 200 `replay()` steps in each mode: soft/double, hard/non-double, hard/double.
@@ -187,6 +189,10 @@ Nothing is committed to `main`.
   - `step1/full`: random_trips, grid observations, `multi` reward, soft/double.
   - `step1/base`: hard/non-double, `wait` reward, no comm.
   - `corridor/dir_coop`: od demand, detector observations with noise/dropout, directional messages, cooperative reward.
+  - Added after the rebase, for the 2F–2I training paths:
+    - `plan/dir_shared`: plan control, the plan library, `plan_rng`, a shared agent, tidal od demand.
+    - `hierarchy/workers/corridor_greenwave`: a fixed expert with residual workers, `delay` reward,
+      the expert-alone validation before training, acceptance at the end.
   - Each runs 6 episodes with `val_every=2`.
 
 **Step 1: opt-in GPU device path, ROCm first (default stays CPU, so CPU parity is unaffected).**
@@ -331,6 +337,22 @@ Files:
   - Below the 1.2–1.3× hypothesis: the remaining time is dominated by real matmul work in the train step.
   - The totals understate the gain: the branch runs finish first, so `main`'s final episode + validation run on a less loaded machine.
   - Bigger gains need Tier 2 changes (e.g. `train_every`), which change results.
+- **Rebase onto 2F–2I (`main` `a1057e9`, 2026-10-16): done; parity re-verified.**
+  - The rebase applied cleanly in substance: `d` (the discount column) flows through the fused train step,
+    `emissions=False` reaches the plan/hierarchy validation, and the prefetch peek stays valid
+    because plan choice draws from its own `plan_rng`.
+  - `tests/reference_dqn.py` is now the frozen copy of `a1057e9`'s agent.
+    `tests/test_dqn_parity.py` also covers SMDP discounts, n-step (two keys plus `end_episode`), dueling,
+    ref_action and phase_net. All 12 cases are bit-identical.
+  - Parity harness: it also hashes `plan_rng`; runs without RL agents no longer crash the hook.
+  - The old goldens (recorded on `9d69577`) are kept in `outputs/parity/<host>_pre_rebase_9d69577/`.
+    New goldens were recorded on `97ebc77` (harness only, plus the hook fix above).
+  - `tsc parity check` at the tip: IDENTICAL on step1/full, step1/base, corridor/dir_coop,
+    plan/dir_shared and hierarchy/workers/corridor_greenwave (accept.json identical too).
+  - Fixed: a policy loaded inside a training run (RL experts, expert workers, acceptance at the end
+    of hierarchy runs) forced the CPU. A GPU run would have crashed there, because one process
+    cannot switch devices. `load_policy(device=None)` now keeps the process's device.
+  - `accept()` generates its acceptance routes once for both policies.
 - **Open:**
   - M2: the coworker runs the RX 7900 XT checklist (`docs/GPU.md`).
   - M3: cross-machine CPU diagnostic.
