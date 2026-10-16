@@ -6,9 +6,12 @@ import pytest
 
 from tsc import config, devices
 
+# devices.build_info() of a CUDA build without Blackwell kernels, and of ROCm builds
 CUDA_221 = {'is_cuda_build': True, 'is_rocm_build': False,
             'cuda_compute_capabilities': ['sm_60', 'sm_70', 'sm_80', 'sm_89', 'compute_90']}
 ROCM = {'is_cuda_build': False, 'is_rocm_build': True}
+ROCM_GFX11 = {'is_cuda_build': False, 'is_rocm_build': True,
+              'cuda_compute_capabilities': ['gfx900', 'gfx90a', 'gfx1030', 'gfx1100', 'gfx1101']}
 
 
 @pytest.mark.parametrize('cc, status', [
@@ -45,6 +48,30 @@ def test_rocm_verdict():
     assert devices.verdict({'device_name': 'AMD Radeon Graphics'}, ROCM)[0] == 'unsupported'
 
 
+def test_rocm_build_without_the_arch():
+    assert devices.verdict({'device_name': 'AMD Radeon RX 7900 XT', 'gcn_arch_name': 'gfx1100'},
+                           ROCM_GFX11)[0] == 'unverified'
+    status, reason, arch = devices.verdict({'device_name': 'AMD Radeon RX 9070',
+                                            'gcn_arch_name': 'gfx1201'}, ROCM_GFX11)
+    assert (status, arch) == ('unsupported', 'gfx1201') and 'no kernels' in reason
+
+
+def test_torch_device(monkeypatch):
+    import torch
+    monkeypatch.setattr(devices, '_configured', None)
+    assert devices.torch_device() == torch.device('cpu')
+    monkeypatch.setattr(devices, '_configured', {'device': 'gpu', 'index': 1})
+    assert devices.torch_device() == torch.device('cuda', 1)
+
+
+def test_backend_of_builds():
+    from types import SimpleNamespace
+    build = lambda cuda, hip: SimpleNamespace(version=SimpleNamespace(cuda=cuda, hip=hip))  # noqa: E731
+    assert devices.backend(build('13.0', None)) == 'cuda'
+    assert devices.backend(build(None, '7.2.0')) == 'rocm'
+    assert devices.backend(build(None, None)) == 'cpu-only'
+
+
 def gpu(index, name, status):
     return {'index': index, 'name': name, 'arch': None, 'status': status, 'reason': status}
 
@@ -64,8 +91,10 @@ def test_choose_skips_integrated_gpu():
 def test_prepare_cpu_hides_gpus(monkeypatch):
     for var in devices.HIDE_VARS:
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv('CUBLAS_WORKSPACE_CONFIG', raising=False)
     devices.prepare('gpu')
     assert not any(var in os.environ for var in devices.HIDE_VARS)
+    assert os.environ['CUBLAS_WORKSPACE_CONFIG'] == ':4096:8'     # deterministic cuBLAS
     devices.prepare('cpu')
     assert all(os.environ[var] == '' for var in devices.HIDE_VARS)
     with pytest.raises(ValueError):

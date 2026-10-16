@@ -193,7 +193,8 @@ class DQNAgent:
                  batch_size=100, buffer_size=50000, learn_start=500, hidden=(400, 400),
                  dueling=False, n_step=1, ref_action=-1, phase_net=False, device=None):
         """n_states: input size, or (n_stages, n_feats) for the phase-wise network.
-        device: torch device of the networks (default 'cpu')."""
+        device: torch device of the networks (default: tsc.devices.torch_device(), the
+        device this process was configured for, else the CPU)."""
         self.n_states = n_states
         self.n_actions = n_actions
         self.double = double
@@ -207,7 +208,10 @@ class DQNAgent:
         self.grad_steps = 0
         self.n_step = n_step
         self.recent = {}                  # key -> last transitions not yet n steps old
-        self.device = torch.device(device or 'cpu')
+        if device is None:
+            from tsc.devices import torch_device
+            device = torch_device()
+        self.device = torch.device(device)
 
         if phase_net:
             build = lambda: build_phase_qnet(*n_states, hidden=hidden)  # noqa: E731

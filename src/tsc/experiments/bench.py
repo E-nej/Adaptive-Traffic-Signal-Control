@@ -99,7 +99,12 @@ def run_mix(cfg, mix, episodes, out_dir):
     times = {'gpu': [], 'cpu': []}
     per_run_rate = []
     n_episodes = 0
+    gpu_peak = []                                   # PyTorch's peak allocation per GPU run
     for run_cfg, run_dir in tasks:
+        with open(os.path.join(run_dir, 'run_info.json')) as f:
+            peak = json.load(f).get('gpu_peak_memory_mb')
+        if peak is not None:
+            gpu_peak.append(peak)
         with open(os.path.join(run_dir, 'train_log.csv')) as f:
             secs = [float(row['seconds']) for row in csv.DictReader(f)]
         n_episodes += len(secs)
@@ -115,6 +120,7 @@ def run_mix(cfg, mix, episodes, out_dir):
         'episode_s_median': {d: round(float(np.median(t)), 2) for d, t in times.items() if t},
         'episode_s_iqr': {d: round(float(np.subtract(*np.percentile(t, [75, 25]))), 2)
                           for d, t in times.items() if t},
+        'gpu_peak_memory_mb_per_run': max(gpu_peak) if gpu_peak else None,
         **usage,
     }
 

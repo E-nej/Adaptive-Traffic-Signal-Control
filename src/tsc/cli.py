@@ -8,7 +8,7 @@
     tsc diagnose messages configs/step2/evaluate.toml --runs "outputs/train/step2_full/s*"
     tsc accept "outputs/train/hier2_corridor_network/s*" --scenarios 6
     tsc parity record configs/step1/full.toml      (then, after a change: tsc parity check ...)
-    tsc devices                                     (what TensorFlow sees; GPU support verdicts)
+    tsc devices                                     (what PyTorch sees; GPU support verdicts)
     tsc bench configs/step1/full.toml --mix cpu:5 --mix gpu:2,cpu:4
 
 Any config value can be overridden with --set section.key=value (TOML syntax),
@@ -98,6 +98,9 @@ def cmd_diagnose(args):
     getattr(diagnose, args.what)(cfg, out_dir=args.out)
 
 
+TORCH_PIN = '2.14.'          # the PyTorch minor version pyproject.toml pins
+
+
 def cmd_devices(args):
     import json
 
@@ -105,17 +108,17 @@ def cmd_devices(args):
     from tsc.experiments.common import physical_cores, software_stack
     info = devices.describe()
     stack = software_stack()
-    print(f"TensorFlow {info['tensorflow']} ({info['backend']} build) {json.dumps(info['build'])}")
-    if not info['tensorflow'].startswith('2.21.'):
-        print(f"  WARNING: TensorFlow {info['tensorflow']} differs from the pinned 2.21.* "
-              f"(packages: {info['packages']}); recorded in run_info.json of every run")
+    print(f"PyTorch {info['torch']} ({info['backend']} build) {json.dumps(info['build'])}")
+    if not info['torch'].startswith(TORCH_PIN):
+        print(f"  WARNING: PyTorch {info['torch']} differs from the pinned {TORCH_PIN}*; "
+              f"recorded in run_info.json of every run")
     if info['hidden_by_env']:
         print(f"  GPUs hidden by environment: {info['hidden_by_env']}")
     print(f"CPU: {stack['cpu']}, {physical_cores()} physical cores, {os.cpu_count()} threads, "
           f"SIMD {' '.join(stack['cpu_flags'])}")
     print(f"  suggested CPU-only --workers: {max(1, physical_cores())}")
     if not info['gpus']:
-        print('GPUs: none visible to TensorFlow (see docs/GPU.md)')
+        print('GPUs: none visible to PyTorch (see docs/GPU.md)')
     for g in info['gpus']:
         print(f"GPU #{g['index']}: {g['name']} [{g['arch'] or 'arch ?'}] -> {g['status'].upper()}: "
               f"{g['reason']}")
@@ -217,7 +220,7 @@ def build_parser():
     d.add_argument('--runs', nargs='*', help='trained run directories (globs ok)')
     d.set_defaults(func=cmd_diagnose)
 
-    dv = sub.add_parser('devices', help='CPU / GPUs TensorFlow can use, with support verdicts')
+    dv = sub.add_parser('devices', help='CPU / GPUs PyTorch can use, with support verdicts')
     dv.set_defaults(func=cmd_devices)
 
     b = sub.add_parser('bench', help='training throughput (episodes/min) under CPU/GPU worker mixes')

@@ -1,17 +1,19 @@
 """Device for the Q-networks: the CPU (default, the parity reference) or one GPU (CUDA or ROCm).
 
-TensorFlow must be imported before a run is seeded (CLAUDE.md), so the setup is split:
+PyTorch is imported before a run is seeded (CLAUDE.md), so the setup is split:
 
-    prepare(device)                before importing TensorFlow: device 'cpu' hides all GPUs
+    prepare(device)                before importing PyTorch: device 'cpu' hides all GPUs;
+                                   'gpu' sets CUBLAS_WORKSPACE_CONFIG (deterministic cuBLAS)
     configure(device, gpu_index)   after importing it, before seeding: picks the GPU and makes
-                                   it reproducible (memory growth, op determinism, no TF32)
+                                   it reproducible (deterministic algorithms, no TF32)
+    torch_device()                 the torch.device the agents put their networks on
 
-Neither consumes RNG.  GPU results are not bit-identical to CPU results (parity level 3
-in CLAUDE.md); repeated runs on the same GPU and software stack are (level 2).  See
-docs/GPU.md for installation (NVIDIA: `uv sync --extra cuda`; AMD: tensorflow-rocm) and
-for which GPUs have been verified.
+None of them consumes RNG.  GPU results are not bit-identical to CPU results (parity level
+3 in CLAUDE.md); repeated runs on the same GPU and software stack are (level 2).  See
+docs/GPU.md for installation (`uv sync --extra cuda` or `--extra rocm`) and for which GPUs
+have been verified.
 
-TensorFlow exposes CUDA and ROCm devices alike as 'GPU', so everything here is
+PyTorch exposes CUDA and ROCm devices alike as 'cuda:<i>', so everything here is
 backend-agnostic except the compatibility check (`verdict`).
 """
 
@@ -27,7 +29,7 @@ HIDE_VARS = ('CUDA_VISIBLE_DEVICES', 'HIP_VISIBLE_DEVICES')
 VERIFIED = {}
 
 # AMD integrated GPUs (APUs): ROCm may enumerate them next to the discrete card, which is
-# known to crash or hang; TensorFlow ROCm builds do not support them.
+# known to crash or hang; PyTorch ROCm builds do not support them.
 AMD_INTEGRATED = {'gfx1035', 'gfx1036', 'gfx1037', 'gfx1103', 'gfx1150', 'gfx1151', 'gfx1152'}
 
 _configured = None   # the device this process was configured for
@@ -40,18 +42,21 @@ def check(device):
 
 
 def prepare(device):
-    """Call before TensorFlow is imported.  'cpu': make sure TensorFlow cannot see any GPU."""
+    """Call before PyTorch is imported.  'cpu': make sure PyTorch cannot see any GPU;
+    'gpu': cuBLAS needs a fixed workspace to be deterministic (set before CUDA starts)."""
     check(device)
     if device == 'cpu':
         for var in HIDE_VARS:
             os.environ[var] = ''
+    else:
+        os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
 
 
 def configure(device, gpu_index=None):
-    """Call after importing TensorFlow and before seeding.  Returns a description of the device."""
+    """Call after importing PyTorch and before seeding.  Returns a description of the device."""
     global _configured
     check(device)
-    import tensorflow as tf
+    import torch
     if _configured is not None:
         if _configured['device'] != device or (device == 'gpu' and gpu_index is not None
                                                and gpu_index != _configured['index']):
@@ -59,26 +64,34 @@ def configure(device, gpu_index=None):
                                f'switch to {device!r} (use separate processes, e.g. --gpu-workers)')
         return _configured
     if device == 'cpu':
-        if tf.config.list_physical_devices('GPU'):   # TensorFlow was imported before prepare()
-            tf.config.set_visible_devices([], 'GPU')
+        # The agents' networks live on torch_device() = the CPU, even if PyTorch was imported
+        # before prepare() and can still see a GPU.
         _configured = {'device': 'cpu'}
         return _configured
 
-    gpus = list_gpus(tf)
+    gpus = list_gpus(torch)
     if not gpus:
         raise RuntimeError(
-            f'device = "gpu" but TensorFlow sees no GPU ({backend(tf)} build). Run `tsc devices` '
+            f'device = "gpu" but PyTorch sees no GPU ({backend(torch)} build). Run `tsc devices` '
             f'and see docs/GPU.md, or use device = "cpu".')
     chosen = choose(gpus, gpu_index)
-    phys = tf.config.list_physical_devices('GPU')[chosen['index']]
-    tf.config.set_visible_devices([phys], 'GPU')
-    tf.config.experimental.set_memory_growth(phys, True)
-    if tf.sysconfig.get_build_info().get('is_cuda_build'):
-        tf.config.experimental.enable_tensor_float_32_execution(False)
-    tf.config.experimental.enable_op_determinism()
+    torch.cuda.set_device(chosen['index'])
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cuda.matmul.allow_tf32 = False      # NVIDIA: full float32 matmuls
+    torch.backends.cudnn.allow_tf32 = False
     _configured = {'device': 'gpu', 'index': chosen['index'], 'name': chosen['name'],
-                   'arch': chosen['arch'], 'status': chosen['status'], 'backend': backend(tf)}
+                   'arch': chosen['arch'], 'status': chosen['status'], 'backend': backend(torch)}
     return _configured
+
+
+def torch_device():
+    """The torch.device for the Q-networks: the configured GPU, else the CPU."""
+    import torch
+    if _configured is not None and _configured['device'] == 'gpu':
+        return torch.device('cuda', _configured['index'])
+    return torch.device('cpu')
 
 
 def choose(gpus, gpu_index=None):
@@ -101,7 +114,7 @@ def choose(gpus, gpu_index=None):
 
 
 def setup(device=None, gpu_index=None):
-    """prepare + import TensorFlow + configure, for code that has no RNG to protect (evaluation).
+    """prepare + import PyTorch + configure, for code that has no RNG to protect (evaluation).
 
     device None: keep the device this process is already configured for, else 'cpu'.
     """
@@ -110,31 +123,47 @@ def setup(device=None, gpu_index=None):
             return _configured
         device = 'cpu'
     prepare(device)
-    import tensorflow  # noqa: F401
+    import torch  # noqa: F401
     return configure(device, gpu_index)
 
 
 # ----------------------------------------------------------------------
-# What TensorFlow sees
+# What PyTorch sees
 # ----------------------------------------------------------------------
 
-def backend(tf):
-    info = tf.sysconfig.get_build_info()
-    if info.get('is_rocm_build'):
+def backend(torch):
+    if torch.version.hip:
         return 'rocm'
-    if info.get('is_cuda_build'):
+    if torch.version.cuda:
         return 'cuda'
     return 'cpu-only'
 
 
-def list_gpus(tf):
-    """[{index, name, arch, status, reason}] for every GPU TensorFlow can see."""
-    build = tf.sysconfig.get_build_info()
+def build_info(torch):
+    """The build facts `verdict` needs: backend flags and the GPU architectures compiled in."""
+    available = torch.cuda.is_available()
+    return {'is_rocm_build': bool(torch.version.hip),
+            'is_cuda_build': bool(torch.version.cuda) and not torch.version.hip,
+            'cuda_compute_capabilities': list(torch.cuda.get_arch_list()) if available else []}
+
+
+def device_details(torch, i):
+    p = torch.cuda.get_device_properties(i)
+    return {'device_name': p.name, 'compute_capability': (p.major, p.minor),
+            'gcn_arch_name': getattr(p, 'gcnArchName', None),
+            'memory_gb': round(p.total_memory / 2 ** 30, 1)}
+
+
+def list_gpus(torch):
+    """[{index, name, arch, status, reason}] for every GPU PyTorch can see."""
+    if not torch.cuda.is_available():
+        return []
+    build = build_info(torch)
     out = []
-    for i, dev in enumerate(tf.config.list_physical_devices('GPU')):
-        details = tf.config.experimental.get_device_details(dev)
+    for i in range(torch.cuda.device_count()):
+        details = device_details(torch, i)
         status, reason, arch = verdict(details, build)
-        name = details.get('device_name', dev.name)
+        name = details['device_name']
         if status != 'unsupported' and name in VERIFIED:
             status, reason = 'verified', VERIFIED[name]
         out.append({'index': i, 'name': name, 'arch': arch, 'status': status, 'reason': reason})
@@ -144,7 +173,7 @@ def list_gpus(tf):
 def verdict(details, build):
     """(status, reason, arch) of one GPU: status is 'unverified' (should work) or 'unsupported'."""
     if build.get('is_rocm_build'):
-        return _rocm_verdict(details)
+        return _rocm_verdict(details, build)
     cc = details.get('compute_capability')
     if not cc:
         return 'unverified', 'compute capability unknown', None
@@ -154,9 +183,9 @@ def verdict(details, build):
     native = [c for c in caps if c.startswith('sm_')]
     match = [c for c in native if _cc(c)[0] == major and _cc(c)[1] <= minor]
     if match:
-        return 'unverified', f'runs the native {match[-1]} kernels of this TensorFlow build', arch
+        return 'unverified', f'runs the native {match[-1]} kernels of this PyTorch build', arch
     ptx = [c for c in caps if c.startswith('compute_') and _cc(c) <= (major, minor)]
-    reason = (f'this TensorFlow build has no kernels for compute capability {major}.{minor} '
+    reason = (f'this PyTorch build has no kernels for compute capability {major}.{minor} '
               f'(built for {", ".join(caps)})')
     if ptx:
         reason += ('; it would JIT-compile PTX, which fails or takes 30+ minutes on new '
@@ -168,7 +197,7 @@ def verdict(details, build):
     return 'unsupported', reason + '. Use device = "cpu".', arch
 
 
-def _rocm_verdict(details):
+def _rocm_verdict(details, build=None):
     arch = None
     for key in ('gcn_arch_name', 'compute_capability'):
         v = details.get(key)
@@ -179,6 +208,10 @@ def _rocm_verdict(details):
     if arch in AMD_INTEGRATED or (arch is None and name.strip() == 'AMD Radeon Graphics'):
         return ('unsupported', 'integrated GPU (APU); hide it with HIP_VISIBLE_DEVICES or disable '
                 'it in the BIOS, see docs/GPU.md', arch)
+    built = [c for c in (build or {}).get('cuda_compute_capabilities') or [] if c.startswith('gfx')]
+    if arch and built and arch not in built:
+        return ('unsupported', f'this PyTorch ROCm build has no kernels for {arch} '
+                f'(built for {", ".join(built)}). Use device = "cpu".', arch)
     return 'unverified', f'ROCm device{" " + arch if arch else ""}', arch
 
 
@@ -189,23 +222,16 @@ def _cc(tag):
 
 
 def describe():
-    """Everything `tsc devices` prints (imports TensorFlow)."""
-    import tensorflow as tf
-    from importlib.metadata import PackageNotFoundError, version
-    pins = {}
-    for pkg in ('tensorflow', 'tensorflow-rocm'):
-        try:
-            pins[pkg] = version(pkg)
-        except PackageNotFoundError:
-            pass
-    info = tf.sysconfig.get_build_info()
+    """Everything `tsc devices` prints (imports PyTorch)."""
+    import torch
+    build = {'cuda': torch.version.cuda, 'hip': torch.version.hip,
+             'arch_list': build_info(torch)['cuda_compute_capabilities']}
+    if torch.cuda.is_available() and torch.backends.cudnn.is_available():
+        build['cudnn'] = torch.backends.cudnn.version()
     return {
-        'tensorflow': tf.__version__,
-        'packages': pins,
-        'backend': backend(tf),
-        'build': {k: str(v) for k, v in info.items() if k in (
-            'cuda_version', 'cudnn_version', 'cuda_compute_capabilities', 'rocm_version',
-            'is_cuda_build', 'is_rocm_build')},
-        'gpus': list_gpus(tf),
+        'torch': torch.__version__,
+        'backend': backend(torch),
+        'build': build,
+        'gpus': list_gpus(torch),
         'hidden_by_env': {v: os.environ[v] for v in HIDE_VARS if v in os.environ},
     }

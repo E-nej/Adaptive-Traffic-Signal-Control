@@ -56,7 +56,7 @@ def train(cfg, seeds=None, out_root=None, workers=None, gpu_workers=0):
         if gpu_workers:
             train_cfg['device'] = 'gpu' if i < gpu_workers else 'cpu'
         tasks.append((config_mod.replace(cfg, train=train_cfg), os.path.join(out_root, f's{s}')))
-    # A process that has initialised TensorFlow cannot change its device: mixed devices
+    # A process that has set up a PyTorch device cannot change it: mixed devices
     # need a fresh process per run.
     mixed = len({t[0].train.device for t in tasks}) > 1
     return list(run_parallel(_train_task, tasks, workers or cfg.workers, fresh=mixed))
@@ -493,6 +493,8 @@ def train_one(cfg, out_dir, on_episode_end=None):
                                          'observer_messages': observer.message_rng}})
 
     prefetch.shutdown()
+    if device['device'] == 'gpu':
+        update_run_info(out_dir, gpu_peak_memory_mb=round(torch.cuda.max_memory_allocated() / 2**20, 1))
     greedy.save(out_dir, 'final')
     if log_file is not None:
         log_file.close()
