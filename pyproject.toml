@@ -1,6 +1,6 @@
 [project]
 name = "tsc"
-version = "0.2.0"
+version = "0.3.0"
 description = "Adaptive traffic-signal control with multi-agent deep RL in SUMO"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -11,7 +11,7 @@ dependencies = [
     "libsumo==1.28.0",
     "traci==1.28.0",
     "sumolib==1.28.0",
-    "tensorflow>=2.21,<2.22",
+    # Which build (CPU, CUDA or ROCm) is chosen by the dependency groups below.
     "torch>=2.14,<2.15",
     "numpy>=2.0",
     "pandas>=2.2",
@@ -21,25 +21,52 @@ dependencies = [
     "tomli-w>=1.0",
 ]
 
-[project.optional-dependencies]
-# NVIDIA GPUs (opt-in, see docs/GPU.md): CUDA / cuDNN runtime libraries for TensorFlow's
-# CUDA build.  AMD GPUs use the tensorflow-rocm wheel instead (manual install, docs/GPU.md).
-cuda = ["tensorflow[and-cuda]>=2.21,<2.22"]
+[project.scripts]
+tsc = "tsc.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+# PyTorch build, one of these (docs/GPU.md).  `uv sync` installs the CPU build (the
+# bit-exact reference).  GPUs:  uv sync --no-group cpu --group cuda   (NVIDIA RTX 20xx and
+# newer, incl. RTX 50xx), --group cuda126 (older NVIDIA, e.g. Pascal / Quadro P2000) or
+# --group rocm (AMD, Linux); then run with UV_NO_SYNC=1 so `uv run` keeps that build.
+cpu = ["torch>=2.14,<2.15"]
+cuda = ["torch>=2.14,<2.15"]
+cuda126 = ["torch>=2.14,<2.15"]
+rocm = ["torch>=2.14,<2.15 ; sys_platform == 'linux'", "triton-rocm ; sys_platform == 'linux'"]
+
+[tool.uv]
+default-groups = ["dev", "cpu"]
+conflicts = [[{ group = "cpu" }, { group = "cuda" }, { group = "cuda126" }, { group = "rocm" }]]
 
 [tool.uv.sources]
-# The CPU build by default (small, and the bit-exact reference); GPU builds are extras.
-torch = [{ index = "pytorch-cpu" }]
+torch = [
+    { index = "pytorch-cpu", group = "cpu" },
+    { index = "pytorch-cu130", group = "cuda" },
+    { index = "pytorch-cu126", group = "cuda126" },
+    { index = "pytorch-rocm", group = "rocm" },
+]
+triton-rocm = [{ index = "pytorch-rocm", group = "rocm" }]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
-[project.scripts]
-tsc = "tsc.cli:main"
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
 
-[dependency-groups]
-dev = ["pytest>=8"]
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/rocm7.2"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]
@@ -51,7 +78,3 @@ packages = ["src/tsc"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["sumo: runs short SUMO simulations (deselect with -m 'not sumo')"]
-filterwarnings = [
-    # Keras passes copy=False to np.array on TensorFlow tensors (harmless, NumPy 2 notice)
-    "ignore:__array__ implementation doesn't accept a copy keyword:DeprecationWarning",
-]
