@@ -52,13 +52,13 @@ def save_run_info(cfg, out_dir):
 
 
 def update_run_info(out_dir, **fields):
-    """Add fields to run_info.json (e.g. the device, known only once TensorFlow is imported)."""
+    """Add fields to run_info.json (e.g. the device, known only once PyTorch is imported)."""
     path = os.path.join(out_dir, 'run_info.json')
     with open(path) as f:
         info = json.load(f)
     info.update(fields)
-    if 'tensorflow' in sys.modules:
-        info['stack'] = software_stack()       # now including TensorFlow's build info
+    if 'torch' in sys.modules:
+        info['stack'] = software_stack()       # now including PyTorch's build info
     with open(path, 'w') as f:
         json.dump(info, f, indent=2)
 
@@ -66,12 +66,12 @@ def update_run_info(out_dir, **fields):
 def software_stack():
     """Versions and hardware that can change numerical results (recorded with parity manifests).
 
-    TensorFlow's build info is only included when TensorFlow is already imported: importing it
-    here could shift the RNG streams of a run that has not seeded yet.
+    PyTorch's build info is only included when PyTorch is already imported (a run imports it
+    before seeding; importing it here would only cost time).
     """
     from importlib.metadata import PackageNotFoundError, version
     packages = {}
-    for pkg in ('tensorflow', 'tensorflow-rocm', 'keras', 'numpy', 'eclipse-sumo', 'libsumo'):
+    for pkg in ('torch', 'numpy', 'eclipse-sumo', 'libsumo'):
         try:
             packages[pkg] = version(pkg)
         except PackageNotFoundError:
@@ -83,14 +83,28 @@ def software_stack():
         'cpu': _cpu_model(),
         'cpu_flags': _cpu_flags(),
         'packages': packages,
-        'env': {k: os.environ[k] for k in ('TSC_TF_THREADS', 'TF_ENABLE_ONEDNN_OPTS', 'ONEDNN_MAX_CPU_ISA',
-                                           'CUDA_VISIBLE_DEVICES', 'HIP_VISIBLE_DEVICES')
-                if k in os.environ},
+        'env': {k: os.environ[k] for k in STACK_ENV if k in os.environ},
     }
-    if 'tensorflow' in sys.modules:
-        tf = sys.modules['tensorflow']
-        info['tf_build'] = {k: str(v) for k, v in tf.sysconfig.get_build_info().items()}
+    if 'torch' in sys.modules:
+        torch = sys.modules['torch']
+        info['torch_build'] = {
+            'version': torch.__version__,
+            'cuda': torch.version.cuda,
+            'hip': torch.version.hip,
+            'cudnn': (torch.backends.cudnn.version()
+                      if torch.cuda.is_available() and torch.backends.cudnn.is_available() else None),
+            # the SIMD level PyTorch's CPU kernels use (summation order: AVX2 vs AVX-512)
+            'cpu_capability': torch.backends.cpu.get_cpu_capability(),
+            'mkldnn': torch.backends.mkldnn.is_available(),
+            'threads': torch.get_num_threads(),
+            'interop_threads': torch.get_num_interop_threads(),
+        }
     return info
+
+
+# Environment variables that can change numerical results or the device used.
+STACK_ENV = ('TSC_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'ATEN_CPU_CAPABILITY',
+             'CUBLAS_WORKSPACE_CONFIG', 'CUDA_VISIBLE_DEVICES', 'HIP_VISIBLE_DEVICES')
 
 
 def physical_cores():
