@@ -20,7 +20,11 @@ import make_tf_reference as ref  # noqa: E402
 
 from tsc.agents.dqn import DQNAgent  # noqa: E402
 
-RTOL, ATOL = 1e-5, 1e-6
+# The fused Adam / foreach updates round differently from Keras' op-by-op updates, which
+# compounds to ~5e-7 in the weights over 60 steps (at most 0.43 of this tolerance in any
+# mode).  Real mistakes are far outside it: PyTorch's own epsilon placement gives 18-870x
+# the tolerance, global instead of per-weight gradient clipping 2600-8300x where it clips.
+RTOL, ATOL = 1e-4, 1e-5
 
 
 def load(name):

@@ -102,45 +102,47 @@ def build_phase_qnet(n_stages, n_feats, hidden=(64, 64)):
 
 
 class KerasAdam:
-    """Adam as Keras 3 implements it, with Keras' `clipnorm`.
+    """Adam as Keras 3 implements it, with Keras' `clipnorm`, on PyTorch's fused Adam.
 
     Every weight's gradient is clipped to norm `clipnorm` on its own (g * c / max(|g|, c));
     then m += (g - m)(1 - b1), v += (g^2 - v)(1 - b2) and
-    w -= m * lr sqrt(1 - b2^t) / (1 - b1^t) / (sqrt(v) + eps).  torch.optim.Adam adds eps
-    to the bias-corrected sqrt(v) instead, and clip_grad_norm_ clips the global norm.
+    w -= m * lr sqrt(1 - b2^t) / (1 - b1^t) / (sqrt(v) + eps).  torch.optim.Adam adds its eps
+    to the bias-corrected sqrt(v / (1 - b2^t)) instead, so it is given
+    eps / sqrt(1 - b2^t) at every step, which makes the two updates the same (up to rounding).
+    clip_grad_norm_ would clip the global norm, not each weight's.
     """
 
     def __init__(self, params, lr, beta_1=0.9, beta_2=0.999, epsilon=1e-7, clipnorm=None):
         self.params = list(params)
-        self.lr, self.beta_1, self.beta_2 = lr, beta_1, beta_2
-        self.epsilon, self.clipnorm = epsilon, clipnorm
+        self.beta_2, self.epsilon, self.clipnorm = beta_2, epsilon, clipnorm
         self.iterations = 0
-        self.m = [torch.zeros_like(p) for p in self.params]
-        self.v = [torch.zeros_like(p) for p in self.params]
+        fast = {'fused': True} if self.params[0].device.type in ('cpu', 'cuda') else {'foreach': True}
+        self.adam = torch.optim.Adam(self.params, lr=lr, betas=(beta_1, beta_2), eps=epsilon,
+                                     **fast)
 
     def zero_grad(self):
-        for p in self.params:
-            p.grad = None
+        self.adam.zero_grad(set_to_none=True)
 
     @torch.no_grad()
     def step(self):
-        t = torch.tensor(float(self.iterations + 1))
-        b1_power = torch.tensor(self.beta_1) ** t
-        b2_power = torch.tensor(self.beta_2) ** t
-        alpha = (self.lr * torch.sqrt(1 - b2_power) / (1 - b1_power)).to(self.params[0].device)
-        for p, m, v in zip(self.params, self.m, self.v):
-            g = p.grad
-            if self.clipnorm:
-                norm = torch.sqrt(torch.sum(torch.square(g)))
-                g = g * self.clipnorm / torch.clamp(norm, min=self.clipnorm)
-            m.add_((g - m) * (1 - self.beta_1))
-            v.add_((torch.square(g) - v) * (1 - self.beta_2))
-            p.sub_(m * alpha / (torch.sqrt(v) + self.epsilon))
+        grads = [p.grad for p in self.params]
+        if self.clipnorm:
+            norms = torch._foreach_norm(grads)
+            torch._foreach_clamp_min_(norms, self.clipnorm)
+            if self.clipnorm != 1.0:
+                torch._foreach_mul_(grads, self.clipnorm)
+            torch._foreach_div_(grads, norms)
         self.iterations += 1
+        self.adam.param_groups[0]['eps'] = (
+            self.epsilon / (1.0 - self.beta_2 ** self.iterations) ** 0.5)
+        self.adam.step()
 
     def state_arrays(self):
-        return ([np.array(self.iterations)] + [x.detach().cpu().numpy() for x in self.m]
-                + [x.detach().cpu().numpy() for x in self.v])
+        out = [np.array(self.iterations)]
+        for key in ('exp_avg', 'exp_avg_sq'):
+            out += [self.adam.state[p][key].detach().cpu().numpy() if p in self.adam.state
+                    else np.zeros(tuple(p.shape), np.float32) for p in self.params]
+        return out
 
 
 def keras_weights(model):
@@ -175,7 +177,8 @@ class DQNAgent:
                  batch_size=100, buffer_size=50000, learn_start=500, hidden=(400, 400),
                  dueling=False, n_step=1, ref_action=-1, phase_net=False, device=None):
         """n_states: input size, or (n_stages, n_feats) for the phase-wise network.
-        device: torch device of the networks (default 'cpu')."""
+        device: torch device of the networks (default: tsc.devices.torch_device(), the
+        device this process was configured for, else the CPU)."""
         self.n_states = n_states
         self.n_actions = n_actions
         self.double = double
@@ -189,7 +192,10 @@ class DQNAgent:
         self.grad_steps = 0
         self.n_step = n_step
         self.recent = {}                  # key -> last transitions not yet n steps old
-        self.device = torch.device(device or 'cpu')
+        if device is None:
+            from tsc.devices import torch_device
+            device = torch_device()
+        self.device = torch.device(device)
 
         if phase_net:
             build = lambda: build_phase_qnet(*n_states, hidden=hidden)  # noqa: E731
@@ -199,7 +205,9 @@ class DQNAgent:
         self.q_target = build().to(self.device)
         self.q_target.load_state_dict(self.q.state_dict())
         self.q_target.requires_grad_(False)
-        self.opt = KerasAdam(self.q.parameters(), lr=lr, clipnorm=1.0)
+        self._online_params = list(self.q.parameters())
+        self._target_params = list(self.q_target.parameters())
+        self.opt = KerasAdam(self._online_params, lr=lr, clipnorm=1.0)
 
     # ------------------------------------------------------------------
 
@@ -291,8 +299,8 @@ class DQNAgent:
 
     @torch.no_grad()
     def _polyak(self):
-        for t, w in zip(self.q_target.parameters(), self.q.parameters()):
-            t.copy_(self.tau * w + (1.0 - self.tau) * t)
+        """target <- tau * online + (1 - tau) * target, one fused op over all weights."""
+        torch._foreach_lerp_(self._target_params, self._online_params, self.tau)
 
     # ------------------------------------------------------------------
 
